@@ -1,0 +1,108 @@
+*&---------------------------------------------------------------------*
+*&  Include           Z068_0060_ALV
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+*       CLASS LCL_EVENT_RECEIVER DEFINITION
+*----------------------------------------------------------------------*
+CLASS LCL_EVENT_RECEIVER DEFINITION.
+  PUBLIC SECTION.
+
+    METHODS:
+      HANDLE_DOUBLE_CLICK  FOR EVENT DOUBLE_CLICK OF CL_GUI_ALV_GRID
+        IMPORTING E_ROW
+                  E_COLUMN
+                  ES_ROW_NO,
+
+      HANDLE_HOTSPOT_CLICK FOR EVENT HOTSPOT_CLICK OF CL_GUI_ALV_GRID
+        IMPORTING E_ROW_ID
+                  E_COLUMN_ID
+                  ES_ROW_NO
+                  SENDER,
+
+      HANDLE_TOOLBAR       FOR EVENT TOOLBAR OF CL_GUI_ALV_GRID
+        IMPORTING E_OBJECT
+                  E_INTERACTIVE
+                  SENDER,
+
+      HANDLE_USER_COMMAND  FOR EVENT USER_COMMAND OF CL_GUI_ALV_GRID
+        IMPORTING E_UCOMM
+                  SENDER,
+
+      HANDLE_DATA_CHANGED  FOR EVENT DATA_CHANGED OF CL_GUI_ALV_GRID
+        IMPORTING ER_DATA_CHANGED
+                  SENDER,
+
+      HANDLE_ONF4          FOR EVENT ONF4 OF CL_GUI_ALV_GRID
+        IMPORTING E_FIELDNAME
+                  E_FIELDVALUE
+                  ES_ROW_NO
+                  ER_EVENT_DATA
+                  ET_BAD_CELLS
+                  E_DISPLAY.
+
+ENDCLASS.                    "LCL_EVENT_RECEIVER DEFINITION
+
+*----------------------------------------------------------------------*
+*       CLASS LCL_EVENT_RECEIVER  IMPLEMENTATION
+*----------------------------------------------------------------------*
+CLASS LCL_EVENT_RECEIVER IMPLEMENTATION.
+
+  METHOD HANDLE_DOUBLE_CLICK.
+
+    PERFORM ALV_DOUBLE_CLICK USING E_ROW
+                                   E_COLUMN
+                                   ES_ROW_NO.
+
+  ENDMETHOD.                    "HANDLE_DOUBLE_CLICK
+
+  METHOD HANDLE_HOTSPOT_CLICK.
+
+    PERFORM ALV_HOTSPOT_CLICK USING E_ROW_ID
+                                    E_COLUMN_ID
+                                    ES_ROW_NO.
+
+  ENDMETHOD.                    "HANDLE_HOTSPOT_CLICK
+
+  METHOD HANDLE_USER_COMMAND.
+
+    PERFORM ALV_USER_COMMAND USING E_UCOMM.
+
+  ENDMETHOD.                    "HANDLE_USER_COMMAND
+
+  METHOD HANDLE_TOOLBAR.
+
+    CASE SENDER.
+      WHEN GO_GRID02.
+        PERFORM ALV_EVENT_TOOLBAR_02  USING E_OBJECT
+                                            E_INTERACTIVE.
+      WHEN GO_GRID_POPUP.
+        PERFORM ALV_EVENT_TOOLBAR_POPUP  USING E_OBJECT
+                                               E_INTERACTIVE.
+    ENDCASE.
+
+  ENDMETHOD.                    "HANDLE_TOOLBAR
+
+  METHOD HANDLE_DATA_CHANGED.
+
+    CASE SENDER.
+      WHEN GO_GRID02.
+        PERFORM ALV_DATA_CHANGED01 USING ER_DATA_CHANGED.
+
+      WHEN GO_GRID_POPUP.
+        PERFORM ALV_DATA_CHANGED_POPUP USING ER_DATA_CHANGED.
+    ENDCASE.
+
+  ENDMETHOD.
+
+  METHOD HANDLE_ONF4.
+
+    PERFORM ALV_ONF4 USING E_FIELDNAME
+                           E_FIELDVALUE
+                           ES_ROW_NO
+                           ER_EVENT_DATA
+                           ET_BAD_CELLS
+                           E_DISPLAY.
+
+  ENDMETHOD.                    "HANDLE_ONF4
+
+ENDCLASS.               "LCL_EVENT_RECEIVER IMPLEMENTATION

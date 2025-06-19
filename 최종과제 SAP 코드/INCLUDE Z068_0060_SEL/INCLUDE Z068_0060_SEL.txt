@@ -1,0 +1,9 @@
+*&---------------------------------------------------------------------*
+*&  Include           Z068_0060_SEL
+*&---------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK B01 WITH FRAME TITLE TEXT-B01. "Select Condition
+
+PARAMETERS     : PA_YEAR TYPE N LENGTH 4.        "조회연도
+SELECT-OPTIONS : SO_EMPN FOR ZEDUT068_0010-ZEMP. "사원번호
+
+SELECTION-SCREEN END OF BLOCK B01.

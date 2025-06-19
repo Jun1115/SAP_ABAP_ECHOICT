@@ -1,0 +1,22 @@
+*&---------------------------------------------------------------------*
+*&  Include           Z068_0060_I01
+*&---------------------------------------------------------------------*
+MODULE EXIT_0100 INPUT.
+
+  CASE GV_OKCODE.
+    WHEN 'BACK' OR 'EXIT' OR 'CANC'.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  EXIT_0101  INPUT
+*&---------------------------------------------------------------------*
+MODULE EXIT_0101 INPUT.
+
+  CASE GV_OKCODE.
+    WHEN 'BACK' OR 'EXIT' OR 'CANC'.
+      LEAVE TO SCREEN 0.
+  ENDCASE.
+
+ENDMODULE.

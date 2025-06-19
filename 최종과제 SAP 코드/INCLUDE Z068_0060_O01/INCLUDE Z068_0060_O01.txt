@@ -1,0 +1,71 @@
+*&---------------------------------------------------------------------*
+*&  Include           Z068_0060_O01
+*&---------------------------------------------------------------------*
+MODULE STATUS_0100 OUTPUT.
+
+  SET PF-STATUS '0100'.
+  SET TITLEBAR '0100'.
+
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  CREATE_OBJECT_0100  OUTPUT
+*&---------------------------------------------------------------------*
+MODULE CREATE_OBJECT_0100 OUTPUT.
+
+
+  PERFORM: SET_CONTAINER,
+
+           SET_GRID01,
+           SET_GRID02,
+
+           SET_ALV_LAYOUT         CHANGING GS_LAYOUT,
+
+           SET_ALV_TOOLBAR        TABLES   GT_EXCLUDE,
+
+           SET_ALV_FIELDCAT01     TABLES   GT_FIELDCAT01,
+           SET_ALV_FIELDCAT02     TABLES   GT_FIELDCAT02,
+
+           SET_EVENT              CHANGING GO_EVENT_RECEIVER,
+
+           DISPALY_ALV_01         TABLES   GT_FIELDCAT01
+                                           GT_SORT
+                                           GT_EXCLUDE
+                                  USING    GS_LAYOUT,
+
+          DISPALY_ALV_02          TABLES   GT_FIELDCAT02
+                                           GT_SORT
+                                           GT_EXCLUDE
+                                  USING    GS_LAYOUT.
+
+
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  STATUS_0101  OUTPUT
+*&---------------------------------------------------------------------*
+MODULE STATUS_0101 OUTPUT.
+  SET PF-STATUS '0101'.
+  SET TITLEBAR '0101'.
+ENDMODULE.
+*&---------------------------------------------------------------------*
+*&      Module  CREATE_OBJECT_0101  OUTPUT
+*&---------------------------------------------------------------------*
+MODULE CREATE_OBJECT_0101 OUTPUT.
+
+  PERFORM: SET_CONTAINER_POPUP,
+
+           SET_GRID_POPUP,
+
+           SET_ALV_LAYOUT_POPUP         CHANGING GS_LAYOUT_POPUP,
+
+           SET_ALV_TOOLBAR_POPUP        TABLES   GT_EXCLUDE_POPUP,
+
+           SET_ALV_FIELDCAT_POPUP       TABLES   GT_FIELDCAT_POPUP,
+
+           SET_EVENT_POPUP              CHANGING GO_EVENT_RECEIVER,
+
+           DISPALY_ALV_POPUP            TABLES   GT_FIELDCAT_POPUP
+                                                 GT_SORT
+                                                 GT_EXCLUDE_POPUP
+                                        USING    GS_LAYOUT_POPUP.
+
+ENDMODULE.

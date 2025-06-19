@@ -1,0 +1,43 @@
+*&---------------------------------------------------------------------*
+*& Report Z068_0060
+*&---------------------------------------------------------------------*
+REPORT Z068_0060.
+
+*----------------------------------------------------------------------*
+* INCLUDE
+*----------------------------------------------------------------------*
+INCLUDE Z068_0060_TOP.
+INCLUDE Z068_0060_SEL.
+INCLUDE Z068_0060_ALV.
+INCLUDE Z068_0060_F01.
+INCLUDE Z068_0060_I01.
+INCLUDE Z068_0060_O01.
+
+*---------------------------------------------------------------------*
+* INITIALIZATION
+*---------------------------------------------------------------------*
+INITIALIZATION.
+  PERFORM INITIALIZATION.
+
+*---------------------------------------------------------------------*
+* AT SELECTION-SCREEN ON
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN ON PA_YEAR.
+  PERFORM CHECK_DATA_YEAR.  "조회연도 유효성 검사
+AT SELECTION-SCREEN ON SO_EMPN.
+  PERFORM CHECK_DATA_ZEMPN. "사원번호 유효성 검사
+
+*---------------------------------------------------------------------*
+* AT SELECTION-SCREEN ON VALUE-REQUEST FOR
+*---------------------------------------------------------------------*
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR SO_EMPN-LOW.
+  PERFORM F4_HELP_EMPN. "사원번호 SEARCH HELP
+AT SELECTION-SCREEN ON VALUE-REQUEST FOR SO_EMPN-HIGH.
+  PERFORM F4_HELP_EMPN. "사원번호 SEARCH HELP
+
+*---------------------------------------------------------------------*
+* START-OF-SELECTION
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+  PERFORM START-OF-SELECTION.
+  CALL SCREEN 0100.

@@ -1,0 +1,125 @@
+*&---------------------------------------------------------------------*
+*&  Include           Z068_0060_TOP
+*&---------------------------------------------------------------------*
+*----------------------------------------------------------------------*
+*  TABLES
+*----------------------------------------------------------------------*
+TABLES :
+  ZEDUT068_0010.
+
+*----------------------------------------------------------------------*
+* Global Variable
+*----------------------------------------------------------------------*
+DATA :
+  GV_OKCODE           TYPE SY-UCOMM,
+  GV_SELECTED_EMP_NUM TYPE ZEDUT068_0010-ZEMP. "더블 클릭 된 사원번호
+
+*----------------------------------------------------------------------*
+* Global Internal Table                                                *
+*----------------------------------------------------------------------*
+DATA :
+  "MAIN SELECT
+  BEGIN OF GS_MAIN,
+    EMP_NUM        TYPE ZEDUT068_0010-ZEMP,      "사원번호
+    EMP_NAME       TYPE ZEDUT068_0010-ZNAME1,    "사원명
+
+    PROJECT_ID     TYPE ZEDUT068_0020-ZPROJ,     "프로젝트 ID
+    PROJECT_NAME   TYPE ZEDUT068_0020-ZNAME2,    "프로젝트명
+    MODULE         TYPE ZEDUT068_0100-ZMODULE,   "MODULE
+    PERIOD_START   TYPE ZEDUT068_0100-ZPERIOD_S, "투입월
+    PERIOD_END     TYPE ZEDUT068_0100-ZPERIOD_E, "종료월
+    PROJECT_AMOUNT TYPE ZEDUT068_0100-AMOUNT,
+
+    CERT_CODE      TYPE ZEDUT068_0200-ZCERTI,    "자격증코드
+    CERT_NAME      TYPE ZEDUT068_0040-ZNAME4,    "자격증명
+  END OF GS_MAIN,
+  GS_FILTERED LIKE GS_MAIN,
+  GT_MAIN     LIKE TABLE OF GS_MAIN,
+  GT_FILTERED LIKE STANDARD TABLE OF GS_FILTERED, "조회조건 적용 TABLE
+
+  "사원번호 유효성 검사 및 SEARCH HELP 테이블
+  BEGIN OF GS_EMP_NUM,
+    EMP_NUM  TYPE ZEDUT068_0010-ZEMP,
+    EMP_NAME TYPE ZEDUT068_0010-ZNAME1,
+  END OF GS_EMP_NUM,
+  GT_EMP_NUM_SORT LIKE SORTED TABLE OF GS_EMP_NUM WITH UNIQUE KEY EMP_NUM, "중복 제거용 SORTED TABLE
+  GT_EMP_NUM_STD  LIKE TABLE OF GS_EMP_NUM,                                "서치 헬프용 STANDARD TABLE
+
+  "SCREEN1 테이블
+  BEGIN OF GS_EMP_INPUT,
+    EMP_NUM     TYPE ZEDUT068_0010-ZEMP,      "사원번호
+    EMP_NAME    TYPE ZEDUT068_0010-ZNAME1,    "사원명
+    MONTH_INPUT TYPE I,                       "투입개월수
+    CERT_INPUT  TYPE I,                       "자격증갯수
+  END OF GS_EMP_INPUT,
+  GT_EMP_INPUT LIKE TABLE OF GS_EMP_INPUT,
+
+  "SCREEN2 테이블
+  BEGIN OF GS_PROJECT_INPUT,
+    PROJECT_ID     TYPE ZEDUT068_0100-ZPROJ,     "프로젝트 ID
+    PROJECT_NAME   TYPE ZEDUT068_0020-ZNAME2,    "프로젝트명
+    MODULE         TYPE ZEDUT068_0100-ZMODULE,   "MODULE
+    PERIOD_START   TYPE ZEDUT068_0100-ZPERIOD_S, "투입월
+    PERIOD_END     TYPE ZEDUT068_0100-ZPERIOD_E, "종료월
+    PROJECT_AMOUNT TYPE ZEDUT068_0100-AMOUNT,
+  END OF GS_PROJECT_INPUT,
+  GT_PROJECT_INPUT      LIKE TABLE OF GS_PROJECT_INPUT,
+  GT_PROJECT_INPUT_SAVE LIKE TABLE OF GS_PROJECT_INPUT, "생성 혹은 삭제 이전 테이블
+
+  "SCREEN3 테이블
+  BEGIN OF GS_CERTI_INPUT,
+    CERT_CODE TYPE ZEDUT068_0200-ZCERTI,    "자격증코드
+    CERT_NAME TYPE ZEDUT068_0040-ZNAME4,    "자격증명
+  END OF GS_CERTI_INPUT,
+  GT_CERTI_INPUT      LIKE TABLE OF GS_CERTI_INPUT,
+  GT_CERTI_INPUT_SAVE LIKE TABLE OF GS_CERTI_INPUT. "생성 혹은 삭제 이전 테이블
+
+*----------------------------------------------------------------------*
+* Constant                                                             *
+*----------------------------------------------------------------------*
+CONSTANTS:GC_A TYPE C VALUE 'A',
+          GC_B TYPE C VALUE 'B',
+          GC_C TYPE C VALUE 'C',
+          GC_E TYPE C VALUE 'E',
+          GC_I TYPE C VALUE 'I',
+          GC_R TYPE C VALUE 'R',
+          GC_S TYPE C VALUE 'S',
+          GC_X TYPE C VALUE 'X',
+          GC_D TYPE C VALUE 'D',
+          GC_1 TYPE C VALUE '1'.
+
+*----------------------------------------------------------------------*
+* CLASS                                                                *
+*----------------------------------------------------------------------*
+CLASS : LCL_EVENT_RECEIVER DEFINITION DEFERRED.
+
+*----------------------------------------------------------------------*
+*  ALV DEFINITION TYPES & VARIABLE
+*----------------------------------------------------------------------*
+DATA : GO_DOCKING_CONTAINER TYPE REF TO CL_GUI_DOCKING_CONTAINER,
+       GO_SPLITTER          TYPE REF TO CL_GUI_SPLITTER_CONTAINER,
+
+       GO_CONTAINER01       TYPE REF TO CL_GUI_CONTAINER,
+       GO_CONTAINER02       TYPE REF TO CL_GUI_CONTAINER,
+       GO_CONTAINER_POPUP   TYPE REF TO CL_GUI_DOCKING_CONTAINER,
+
+       GO_GRID01            TYPE REF TO CL_GUI_ALV_GRID,
+       GO_GRID02            TYPE REF TO CL_GUI_ALV_GRID,
+       GO_GRID_POPUP        TYPE REF TO CL_GUI_ALV_GRID,
+
+       GT_FIELDCAT01        TYPE LVC_T_FCAT,
+       GT_FIELDCAT02        TYPE LVC_T_FCAT,
+       GT_FIELDCAT_POPUP    TYPE LVC_T_FCAT,
+
+       GT_EXCLUDE           TYPE UI_FUNCTIONS,
+       GT_EXCLUDE_POPUP     TYPE UI_FUNCTIONS,
+
+       GT_SORT              TYPE LVC_T_SORT,
+       GT_EXTAB             TYPE SLIS_T_EXTAB WITH HEADER LINE,
+
+       GS_LAYOUT            TYPE LVC_S_LAYO,
+       GS_LAYOUT_POPUP      TYPE LVC_S_LAYO,
+
+       GS_VARIANT           TYPE DISVARIANT,
+
+       GO_EVENT_RECEIVER    TYPE REF TO LCL_EVENT_RECEIVER.

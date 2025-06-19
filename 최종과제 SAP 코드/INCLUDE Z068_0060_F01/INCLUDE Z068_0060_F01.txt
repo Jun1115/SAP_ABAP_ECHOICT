@@ -1,0 +1,1866 @@
+*&---------------------------------------------------------------------*
+*&  Include           Z068_0060_F01
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  INITIALIZATION
+*&---------------------------------------------------------------------*
+FORM INITIALIZATION .
+
+  DATA : LV_DATE TYPE D.
+
+  "조회연도 초기값 → 오늘 기준 연도
+  LV_DATE = SY-DATUM.
+  PA_YEAR = LV_DATE+0(4).
+
+  "전체 조회
+  SELECT T010~ZEMP,
+         T010~ZNAME1,
+         T100~ZPROJ,
+         T020~ZNAME2,
+         T100~ZMODULE,
+         T100~ZPERIOD_S,
+         T100~ZPERIOD_E,
+         T100~AMOUNT,
+         T200~ZCERTI,
+         T040~ZNAME4
+    INTO TABLE @GT_MAIN
+    FROM ZEDUT068_0010 AS T010 INNER JOIN ZEDUT068_0100 AS T100
+                                       ON T010~ZEMP = T100~ZEMP
+                               INNER JOIN ZEDUT068_0020 AS T020
+                                       ON T100~ZPROJ = T020~ZPROJ
+                                LEFT JOIN ZEDUT068_0200 AS T200
+                                       ON T010~ZEMP = T200~ZEMP
+                                LEFT JOIN ZEDUT068_0040 AS T040
+                                       ON T200~ZCERTI = T040~ZCERTI
+    ORDER BY T010~ZEMP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_DATA_YEAR
+*&---------------------------------------------------------------------*
+FORM CHECK_DATA_YEAR .
+
+  IF PA_YEAR IS INITIAL.
+    MESSAGE TEXT-E01 TYPE 'E'. "조회연도는 필수 입력값입니다.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_DATA_ZEMPN
+*&---------------------------------------------------------------------*
+FORM CHECK_DATA_ZEMPN .
+
+  PERFORM PREPARE_EMP_NUM_LIST.
+
+  "LOW, HIGH 하나라도 존재하면 유효성 CHECK
+  IF SO_EMPN IS NOT INITIAL.
+    LOOP AT SO_EMPN INTO DATA(LS_SO_EMPN).
+
+      "LOW CHECK
+      IF LS_SO_EMPN-LOW IS NOT INITIAL.
+        READ TABLE GT_EMP_NUM_SORT TRANSPORTING NO FIELDS
+                                   WITH KEY EMP_NUM = LS_SO_EMPN-LOW.
+        IF SY-SUBRC <> 0.
+          MESSAGE TEXT-E02 TYPE 'S' DISPLAY LIKE 'E'. "유효하지 않은 사원번호 입니다.
+          LEAVE LIST-PROCESSING.
+        ENDIF.
+      ENDIF.
+
+      "HIGH CHECK
+      IF LS_SO_EMPN-HIGH IS NOT INITIAL.
+        READ TABLE GT_EMP_NUM_SORT TRANSPORTING NO FIELDS
+                                   WITH KEY EMP_NUM = LS_SO_EMPN-HIGH.
+        IF SY-SUBRC <> 0.
+          MESSAGE TEXT-E02 TYPE 'S' DISPLAY LIKE 'E'. "유효하지 않은 사원번호 입니다.
+          LEAVE LIST-PROCESSING.
+        ENDIF.
+      ENDIF.
+
+    ENDLOOP.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  F4_HELP_ZEMPN
+*&---------------------------------------------------------------------*
+FORM F4_HELP_EMPN .
+
+  PERFORM PREPARE_EMP_NUM_LIST.
+
+  CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+    EXPORTING
+      RETFIELD    = 'EMP_NUM'
+      DYNPPROG    = SY-REPID
+      DYNPNR      = SY-DYNNR
+      DYNPROFIELD = 'SO_EMPN'
+      VALUE_ORG   = 'S'
+    TABLES
+      VALUE_TAB   = GT_EMP_NUM_STD.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  PREPARE_EMP_NUM_LIST
+*&---------------------------------------------------------------------*
+FORM PREPARE_EMP_NUM_LIST .
+
+  "중복 제거 사원번호 및 사원명 테이블 생성
+  IF GT_EMP_NUM_STD IS INITIAL.
+    LOOP AT GT_MAIN ASSIGNING FIELD-SYMBOL(<LS_EMP_NUM>).
+      GS_EMP_NUM-EMP_NUM   = <LS_EMP_NUM>-EMP_NUM.
+      GS_EMP_NUM-EMP_NAME   = <LS_EMP_NUM>-EMP_NAME.
+      INSERT GS_EMP_NUM INTO TABLE GT_EMP_NUM_SORT.  "EMP_NUM(사원번호)를 기준으로 UNIQUE KEY 설정되어 있어서 중복값 안들어감
+    ENDLOOP.
+    GT_EMP_NUM_STD = GT_EMP_NUM_SORT. "F4IF_INT_TABLE_VALUE_REQUEST 함수를 사용할 TABLE 은 STANDARD TABLE
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  START-OF-SELECTION
+*&---------------------------------------------------------------------*
+FORM START-OF-SELECTION .
+
+  DATA : LV_YEAR_START TYPE N LENGTH 4,
+         LV_YEAR_END   TYPE N LENGTH 4.
+
+  "조회연도 및 사원번호 조건 필터
+  LOOP AT GT_MAIN INTO GS_MAIN.
+
+    LV_YEAR_START = GS_MAIN-PERIOD_START+0(4). "투입월
+    LV_YEAR_END   = GS_MAIN-PERIOD_END+0(4).   "종료월
+
+    IF LV_YEAR_START <= PA_YEAR AND ( LV_YEAR_END IS INITIAL OR LV_YEAR_END >= PA_YEAR ). "조회연도 필터링
+      IF SO_EMPN[] IS INITIAL OR GS_MAIN-EMP_NUM IN SO_EMPN. "사원번호 필터링
+        APPEND GS_MAIN TO GT_FILTERED. "조회조건 반영된 테이블
+      ENDIF.
+    ENDIF.
+
+  ENDLOOP.
+
+  PERFORM REFRESH_EMP_SUMMARY.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_CONTAINER
+*&---------------------------------------------------------------------*
+FORM SET_CONTAINER .
+
+  IF GO_DOCKING_CONTAINER IS INITIAL.
+
+    "외부 컨테이너 생성
+    CREATE OBJECT GO_DOCKING_CONTAINER
+      EXPORTING
+        REPID     = SY-REPID
+        DYNNR     = SY-DYNNR
+        SIDE      = GO_DOCKING_CONTAINER->DOCK_AT_TOP
+        EXTENSION = 2000.
+
+    "스플리터 생성
+    CREATE OBJECT GO_SPLITTER
+      EXPORTING
+        PARENT  = GO_DOCKING_CONTAINER
+        ROWS    = 1
+        COLUMNS = 2.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_DOUBLE_CLICK
+*&---------------------------------------------------------------------*
+FORM ALV_DOUBLE_CLICK  USING    P_E_ROW     TYPE LVC_S_ROW
+                                P_E_COLUMN  TYPE LVC_S_COL
+                                P_ES_ROW_NO TYPE LVC_S_ROID.
+
+  DATA: LT_PROJECT_INPUT LIKE SORTED TABLE OF GS_PROJECT_INPUT WITH UNIQUE KEY PROJECT_ID PERIOD_START PERIOD_END MODULE,
+        LS_PROJECT_INPUT LIKE GS_PROJECT_INPUT.
+
+  "더블클릭 ROW 확인
+  CHECK P_E_ROW-ROWTYPE IS INITIAL.
+
+  "선택한 사원번호 가져오기
+  READ TABLE GT_EMP_INPUT INTO GS_EMP_INPUT INDEX P_E_ROW-INDEX.
+  IF SY-SUBRC = 0.
+    GV_SELECTED_EMP_NUM = GS_EMP_INPUT-EMP_NUM.
+
+    "사원의 프로젝트 정보를 중복 없이 필터링
+    LOOP AT GT_FILTERED INTO GS_MAIN WHERE EMP_NUM = GS_EMP_INPUT-EMP_NUM.
+      LS_PROJECT_INPUT-PROJECT_ID   = GS_MAIN-PROJECT_ID.
+      LS_PROJECT_INPUT-PROJECT_NAME = GS_MAIN-PROJECT_NAME.
+      LS_PROJECT_INPUT-MODULE       = GS_MAIN-MODULE.
+      LS_PROJECT_INPUT-PERIOD_START = GS_MAIN-PERIOD_START.
+      LS_PROJECT_INPUT-PERIOD_END   = GS_MAIN-PERIOD_END.
+      INSERT LS_PROJECT_INPUT INTO TABLE LT_PROJECT_INPUT.
+      CLEAR LS_PROJECT_INPUT.
+    ENDLOOP.
+
+    "중복 제거된 프로젝트 이력 표시용 테이블로 이동
+    GT_PROJECT_INPUT[] = LT_PROJECT_INPUT[].
+
+  ENDIF.
+
+  "저장(USER COMMAND : SAVE)시 사용될 원본 테이블
+  GT_PROJECT_INPUT_SAVE = GT_PROJECT_INPUT.
+
+  "GRID02 리프레시
+  IF GO_GRID02 IS BOUND.
+    CALL METHOD GO_GRID02->REFRESH_TABLE_DISPLAY.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_HOTSPOT_CLICK
+*&---------------------------------------------------------------------*
+FORM ALV_HOTSPOT_CLICK  USING   P_E_ROW     TYPE LVC_S_ROW
+                                P_E_COLUMN  TYPE LVC_S_COL
+                                P_ES_ROW_NO TYPE LVC_S_ROID.
+
+  DATA: LS_CERTI_INPUT LIKE GS_CERTI_INPUT,
+        LT_CERTI_INPUT LIKE SORTED TABLE OF GS_CERTI_INPUT WITH UNIQUE KEY CERT_CODE.
+
+  "클릭한 사원의 번호 구하기
+  READ TABLE GT_EMP_INPUT INTO GS_EMP_INPUT INDEX P_E_ROW-INDEX.
+  CHECK SY-SUBRC = 0.
+
+  GV_SELECTED_EMP_NUM = GS_EMP_INPUT-EMP_NUM.
+
+  "자격증갯수 필드를 클릭했을 경우
+  IF P_E_COLUMN-FIELDNAME = 'CERT_INPUT'.
+
+    LOOP AT GT_MAIN INTO GS_MAIN WHERE EMP_NUM = GS_EMP_INPUT-EMP_NUM.
+      CLEAR LS_CERTI_INPUT.
+
+      "자격증ID, 자격증명이 없는 행은 PASS
+      IF GS_MAIN-CERT_CODE IS INITIAL AND GS_MAIN-CERT_NAME IS INITIAL.
+        CONTINUE.
+      ENDIF.
+
+      LS_CERTI_INPUT-CERT_CODE = GS_MAIN-CERT_CODE.
+      LS_CERTI_INPUT-CERT_NAME = GS_MAIN-CERT_NAME.
+      INSERT LS_CERTI_INPUT INTO TABLE LT_CERTI_INPUT.
+    ENDLOOP.
+
+    GT_CERTI_INPUT[]    = LT_CERTI_INPUT[].
+    GT_CERTI_INPUT_SAVE = GT_CERTI_INPUT.
+
+    "자격증 POPUP 창 출력
+    CALL SCREEN 0101 STARTING AT 35 3 ENDING AT 70 13.
+
+    REFRESH GT_CERTI_INPUT.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_GRID01
+*&---------------------------------------------------------------------*
+FORM SET_GRID01 .
+
+  IF GO_CONTAINER01 IS INITIAL.
+
+    CALL METHOD GO_SPLITTER->GET_CONTAINER
+      EXPORTING
+        ROW       = 1
+        COLUMN    = 1
+      RECEIVING
+        CONTAINER = GO_CONTAINER01.
+
+    CREATE OBJECT GO_GRID01
+      EXPORTING
+        I_PARENT = GO_CONTAINER01.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_GRID02
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM SET_GRID02 .
+
+  IF GO_CONTAINER02 IS INITIAL.
+
+    CALL METHOD GO_SPLITTER->GET_CONTAINER
+      EXPORTING
+        ROW       = 1
+        COLUMN    = 2
+      RECEIVING
+        CONTAINER = GO_CONTAINER02.
+
+    CREATE OBJECT GO_GRID02
+      EXPORTING
+        I_PARENT = GO_CONTAINER02.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_ALV_LAYOUT
+*&---------------------------------------------------------------------*
+FORM SET_ALV_LAYOUT  CHANGING P_GS_LAYOUT TYPE LVC_S_LAYO.
+
+  GS_LAYOUT-CWIDTH_OPT = GC_A.
+  GS_LAYOUT-SEL_MODE   = GC_B.
+  GS_LAYOUT-SMALLTITLE = GC_X.
+  GS_LAYOUT-GRID_TITLE = TEXT-T01. "사원/프로젝트 별 투입현황
+
+  GS_VARIANT-REPORT = SY-CPROG.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_ALV_FIELDCAT01
+*&---------------------------------------------------------------------*
+FORM SET_ALV_FIELDCAT01  TABLES   P_GT_FIELDCAT01 STRUCTURE LVC_S_FCAT.
+
+  DATA : LS_FIELDCAT LIKE LINE OF GT_FIELDCAT01.
+
+  LS_FIELDCAT-FIELDNAME = 'EMP_NUM'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T02. "사원번호
+  LS_FIELDCAT-COL_POS   = 10.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT01. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'EMP_NAME'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T03. "사원명
+  LS_FIELDCAT-COL_POS   = 20.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT01. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'MONTH_INPUT'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T04. "투입개월수
+  LS_FIELDCAT-COL_POS   = 30.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT01. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'CERT_INPUT'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T05. "자격증갯수
+  LS_FIELDCAT-HOTSPOT   = 'X'.
+  LS_FIELDCAT-COL_POS   = 40.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT01. CLEAR LS_FIELDCAT.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_ALV_FIELDCAT02
+*&---------------------------------------------------------------------*
+FORM SET_ALV_FIELDCAT02  TABLES   P_GT_FIELDCAT02 STRUCTURE LVC_S_FCAT.
+
+  DATA : LS_FIELDCAT LIKE LINE OF GT_FIELDCAT02.
+
+  LS_FIELDCAT-FIELDNAME = 'PROJECT_ID'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T06. "프로젝트 ID
+  LS_FIELDCAT-EDIT      = GC_X.
+  LS_FIELDCAT-F4AVAILABL = GC_X.
+  LS_FIELDCAT-COL_POS   = 10.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT02. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'PROJECT_NAME'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T07. "프로젝트명
+  LS_FIELDCAT-COL_POS   = 20.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT02. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'MODULE'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T08. "MODULE
+  LS_FIELDCAT-EDIT      = GC_X.
+  LS_FIELDCAT-F4AVAILABL = GC_X.
+  LS_FIELDCAT-COL_POS   = 30.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT02. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'PERIOD_START'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T09. "투입월
+  LS_FIELDCAT-EDIT      = GC_X.
+  LS_FIELDCAT-F4AVAILABL = GC_X.
+  LS_FIELDCAT-COL_POS   = 40.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT02. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'PERIOD_END'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T10. "종료월
+  LS_FIELDCAT-EDIT      = GC_X.
+  LS_FIELDCAT-F4AVAILABL = GC_X.
+  LS_FIELDCAT-COL_POS   = 50.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT02. CLEAR LS_FIELDCAT.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DISPALY_ALV_01
+*&---------------------------------------------------------------------*
+FORM DISPALY_ALV_01  TABLES   P_GT_FIELDCAT01 STRUCTURE LVC_S_FCAT
+                              P_GT_SORT
+                              P_GT_EXCLUDE
+                     USING    P_GS_LAYOUT.
+
+  GO_GRID01->SET_TABLE_FOR_FIRST_DISPLAY(
+    EXPORTING
+      IS_LAYOUT                     = GS_LAYOUT
+      I_SAVE                        = GC_A
+      IT_TOOLBAR_EXCLUDING          = GT_EXCLUDE[]
+      IS_VARIANT                    = GS_VARIANT
+    CHANGING
+      IT_OUTTAB                     = GT_EMP_INPUT[]
+      IT_FIELDCATALOG               = GT_FIELDCAT01 ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DISPALY_ALV_02
+*&---------------------------------------------------------------------*
+FORM DISPALY_ALV_02  TABLES   P_GT_FIELDCAT02 STRUCTURE LVC_S_FCAT
+                              P_GT_SORT
+                              P_GT_EXCLUDE
+                     USING    P_GS_LAYOUT.
+
+  "DATA CHANGED 할 때 입력 혹은 복붙하면 바로 뜨게 설정
+  CALL METHOD GO_GRID02->REGISTER_EDIT_EVENT
+    EXPORTING
+      I_EVENT_ID = CL_GUI_ALV_GRID=>MC_EVT_MODIFIED.
+
+  CALL METHOD GO_GRID02->SET_READY_FOR_INPUT
+    EXPORTING
+      I_READY_FOR_INPUT = 1.
+
+  GO_GRID02->SET_TABLE_FOR_FIRST_DISPLAY(
+  EXPORTING
+    IS_LAYOUT                     = GS_LAYOUT
+    I_SAVE                        = GC_A
+    IT_TOOLBAR_EXCLUDING          = GT_EXCLUDE[]
+    IS_VARIANT                    = GS_VARIANT
+  CHANGING
+    IT_OUTTAB                     = GT_PROJECT_INPUT[]
+    IT_FIELDCATALOG               = GT_FIELDCAT02 ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_EVENT
+*&---------------------------------------------------------------------*
+FORM SET_EVENT  CHANGING P_GO_EVENT_RECEIVER.
+
+  DATA(LT_F4) = VALUE LVC_T_F4(
+  ( REGISTER = GC_X FIELDNAME = 'PERIOD_START' )
+  ( REGISTER = GC_X FIELDNAME = 'PERIOD_END' )
+  ( REGISTER = GC_X FIELDNAME = 'PROJECT_ID' )
+  ( REGISTER = GC_X FIELDNAME = 'MODULE' ) ).
+
+  CALL METHOD GO_GRID02->REGISTER_F4_FOR_FIELDS
+    EXPORTING
+      IT_F4 = LT_F4[].
+
+  IF GO_EVENT_RECEIVER IS NOT BOUND.
+
+    CREATE OBJECT GO_EVENT_RECEIVER.
+
+    CALL METHOD GO_GRID01->REGISTER_EDIT_EVENT
+      EXPORTING
+        I_EVENT_ID = CL_GUI_ALV_GRID=>MC_EVT_MODIFIED.  "Enter + F4
+
+    SET HANDLER: GO_EVENT_RECEIVER->HANDLE_DOUBLE_CLICK    FOR GO_GRID01,
+                 GO_EVENT_RECEIVER->HANDLE_HOTSPOT_CLICK   FOR GO_GRID01,
+
+                 GO_EVENT_RECEIVER->HANDLE_TOOLBAR         FOR GO_GRID02,
+                 GO_EVENT_RECEIVER->HANDLE_DATA_CHANGED    FOR GO_GRID02,
+                 GO_EVENT_RECEIVER->HANDLE_ONF4            FOR GO_GRID02,
+                 GO_EVENT_RECEIVER->HANDLE_USER_COMMAND    FOR GO_GRID02.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  CALL_CERT_POPUP
+*&---------------------------------------------------------------------*
+FORM CALL_CERT_POPUP .
+
+  DATA: LO_CONTAINER TYPE REF TO CL_GUI_DIALOGBOX_CONTAINER,
+        LO_GRID      TYPE REF TO CL_GUI_ALV_GRID.
+
+  " 팝업 창 컨테이너 생성
+  CREATE OBJECT LO_CONTAINER
+    EXPORTING
+      CAPTION = '자격증 목록'
+      WIDTH   = 60
+      HEIGHT  = 10
+      TOP     = 5
+      LEFT    = 5.
+
+  " ALV 그리드 생성
+  CREATE OBJECT LO_GRID
+    EXPORTING
+      I_PARENT = LO_CONTAINER.
+
+  CALL METHOD LO_GRID->SET_TABLE_FOR_FIRST_DISPLAY
+    EXPORTING
+      I_STRUCTURE_NAME = 'GS_CERTI_INPUT'
+    CHANGING
+      IT_OUTTAB        = GT_CERTI_INPUT.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_ALV_TOOLBAR
+*&---------------------------------------------------------------------*
+FORM SET_ALV_TOOLBAR  TABLES   P_GT_EXCLUDE.
+
+  DATA : LS_EXCLUDE TYPE UI_FUNC.
+
+  DEFINE _APPEND_EXCLUDE_FUNCTIONS.
+    LS_EXCLUDE = &1.
+    APPEND LS_EXCLUDE TO GT_EXCLUDE.
+
+  END-OF-DEFINITION.
+
+  CLEAR GT_EXCLUDE[].
+
+  _APPEND_EXCLUDE_FUNCTIONS :
+                              CL_GUI_ALV_GRID=>MC_FC_AUF,
+*                              CL_GUI_ALV_GRID=>MC_FC_AVERAGE,
+                              CL_GUI_ALV_GRID=>MC_FC_BACK_CLASSIC,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_ABC,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_CHAIN,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_CRBATCH,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_CRWEB,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_LINEITEMS,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_MASTER_DATA,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_MORE,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_REPORT,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_XINT,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_XXL,
+                              CL_GUI_ALV_GRID=>MC_FC_COL_INVISIBLE,
+*                              CL_GUI_ALV_GRID=>MC_FC_COL_OPTIMIZE,
+                              CL_GUI_ALV_GRID=>MC_FC_CURRENT_VARIANT,
+                              CL_GUI_ALV_GRID=>MC_FC_DATA_SAVE,
+                              CL_GUI_ALV_GRID=>MC_FC_DELETE_FILTER,
+                              CL_GUI_ALV_GRID=>MC_FC_DESELECT_ALL,
+*                              CL_GUI_ALV_GRID=>MC_FC_DETAIL,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPCRDATA,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPCRDESIG,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPCRTEMPL,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPMDB,
+                              CL_GUI_ALV_GRID=>MC_FC_EXTEND,
+*                              CL_GUI_ALV_GRID=>MC_FC_F4,
+*                              CL_GUI_ALV_GRID=>MC_FC_FILTER,
+*                              CL_GUI_ALV_GRID=>MC_FC_FIND,
+                              CL_GUI_ALV_GRID=>MC_FC_FIX_COLUMNS,
+                              CL_GUI_ALV_GRID=>MC_FC_GRAPH,
+*                              CL_GUI_ALV_GRID=>MC_FC_HELP,
+                              CL_GUI_ALV_GRID=>MC_FC_INFO,
+*                              CL_GUI_ALV_GRID=>MC_FC_LOAD_VARIANT,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_COPY,
+                              CL_GUI_ALV_GRID=>MC_FC_HTML,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_UNDO,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_COPY_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_CUT,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_DELETE_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_INSERT_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_MOVE_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_APPEND_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_PASTE,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_PASTE_NEW_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_MAINTAIN_VARIANT,
+*                              CL_GUI_ALV_GRID=>MC_FC_MAXIMUM,
+*                              CL_GUI_ALV_GRID=>MC_FC_MINIMUM,
+*                              CL_GUI_ALV_GRID=>MC_FC_PC_FILE,
+*                              CL_GUI_ALV_GRID=>MC_FC_PRINT,
+*                              CL_GUI_ALV_GRID=>MC_FC_PRINT_BACK,
+*                              CL_GUI_ALV_GRID=>MC_FC_PRINT_PREV,
+*                              CL_GUI_ALV_GRID=>MC_FC_REFRESH,
+                              CL_GUI_ALV_GRID=>MC_FC_REPREP,
+*                              CL_GUI_ALV_GRID=>MC_FC_SAVE_VARIANT,
+                              CL_GUI_ALV_GRID=>MC_FC_SELECT_ALL,
+                              CL_GUI_ALV_GRID=>MC_FC_SEND,
+                              CL_GUI_ALV_GRID=>MC_FC_SEPARATOR,
+                              CL_GUI_ALV_GRID=>MC_FC_SORT,
+*                              CL_GUI_ALV_GRID=>MC_FC_SORT_ASC,
+*                              CL_GUI_ALV_GRID=>MC_FC_SORT_DSC,
+*                              CL_GUI_ALV_GRID=>MC_FC_SUBTOT,
+*                              CL_GUI_ALV_GRID=>MC_FC_SUM,
+                              CL_GUI_ALV_GRID=>MC_FC_TO_OFFICE,
+                              CL_GUI_ALV_GRID=>MC_FC_TO_REP_TREE,
+                              CL_GUI_ALV_GRID=>MC_FC_UNFIX_COLUMNS,
+*                              CL_GUI_ALV_GRID=>MC_FC_VIEWS,
+                              CL_GUI_ALV_GRID=>MC_FC_VIEW_CRYSTAL,
+*                              CL_GUI_ALV_GRID=>MC_FC_VIEW_EXCEL,
+*                              CL_GUI_ALV_GRID=>MC_FC_VIEW_GRID,
+                              CL_GUI_ALV_GRID=>MC_FC_WORD_PROCESSOR.
+
+  " All button deletea
+*  _APPEND_EXCLUDE_FUNCTIONS CL_GUI_ALV_GRID=>MC_FC_EXCL_ALL.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_EVENT_TOOLBAR02
+*&---------------------------------------------------------------------*
+FORM ALV_EVENT_TOOLBAR_02  USING    P_E_OBJECT TYPE REF TO CL_ALV_EVENT_TOOLBAR_SET
+                                    P_E_INTERACTIVE.
+
+  DATA : LS_TOOLBAR  TYPE STB_BUTTON.
+
+  CLEAR LS_TOOLBAR.
+  MOVE 3                 TO LS_TOOLBAR-BUTN_TYPE.
+  APPEND LS_TOOLBAR      TO P_E_OBJECT->MT_TOOLBAR.
+
+  CLEAR LS_TOOLBAR.
+  MOVE 'ADD'            TO LS_TOOLBAR-FUNCTION.
+  MOVE ICON_INSERT_ROW  TO LS_TOOLBAR-ICON.
+  MOVE TEXT-T14         TO LS_TOOLBAR-QUICKINFO. "생성
+  MOVE TEXT-T14         TO LS_TOOLBAR-TEXT.      "생성
+  MOVE ' '              TO LS_TOOLBAR-DISABLED.
+  APPEND LS_TOOLBAR     TO P_E_OBJECT->MT_TOOLBAR.
+
+  MOVE 'DEL'            TO LS_TOOLBAR-FUNCTION.
+  MOVE ICON_DELETE_ROW  TO LS_TOOLBAR-ICON.
+  MOVE TEXT-T15         TO LS_TOOLBAR-QUICKINFO. "삭제
+  MOVE TEXT-T15         TO LS_TOOLBAR-TEXT.      "삭제
+  MOVE ' '              TO LS_TOOLBAR-DISABLED.
+  APPEND LS_TOOLBAR     TO P_E_OBJECT->MT_TOOLBAR.
+
+  MOVE 'SAVE'           TO LS_TOOLBAR-FUNCTION.
+  MOVE ICON_SYSTEM_SAVE TO LS_TOOLBAR-ICON.
+  MOVE TEXT-T16         TO LS_TOOLBAR-QUICKINFO. "저장
+  MOVE TEXT-T16         TO LS_TOOLBAR-TEXT.      "저장
+  MOVE ' '              TO LS_TOOLBAR-DISABLED.
+  APPEND LS_TOOLBAR     TO P_E_OBJECT->MT_TOOLBAR.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_USER_COMMAND
+*&---------------------------------------------------------------------*
+FORM ALV_USER_COMMAND  USING    P_E_UCOMM.
+
+  CASE P_E_UCOMM.
+    WHEN 'ADD'.
+      PERFORM ADD_PROJECT_ROW.
+    WHEN 'DEL'.
+      PERFORM DELETE_PROJECT_ROWS.
+    WHEN 'SAVE'.
+      PERFORM SAVE_PROJECT_DATA.
+
+    WHEN 'ADD_POPUP'.
+      PERFORM ADD_CERTI_ROW.
+    WHEN 'DEL_POPUP'.
+      PERFORM DELETE_CERTI_ROWS.
+    WHEN 'SAVE_POPUP'.
+      PERFORM SAVE_CERTI_DATA.
+  ENDCASE.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_ALV_TOOLBAR_POPUP
+*&---------------------------------------------------------------------*
+FORM SET_ALV_TOOLBAR_POPUP  TABLES   P_GT_EXCLUDE_POPUP.
+
+
+  DATA : LS_EXCLUDE_POPUP TYPE UI_FUNC.
+
+  DEFINE _APPEND_EXCLUDE_FUNCTIONS.
+    LS_EXCLUDE_POPUP = &1.
+    APPEND LS_EXCLUDE_POPUP TO GT_EXCLUDE_POPUP.
+
+  END-OF-DEFINITION.
+
+  CLEAR GT_EXCLUDE[].
+
+  _APPEND_EXCLUDE_FUNCTIONS :
+                              CL_GUI_ALV_GRID=>MC_FC_AUF,
+                              CL_GUI_ALV_GRID=>MC_FC_AVERAGE,
+                              CL_GUI_ALV_GRID=>MC_FC_BACK_CLASSIC,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_ABC,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_CHAIN,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_CRBATCH,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_CRWEB,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_LINEITEMS,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_MASTER_DATA,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_MORE,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_REPORT,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_XINT,
+                              CL_GUI_ALV_GRID=>MC_FC_CALL_XXL,
+                              CL_GUI_ALV_GRID=>MC_FC_COL_INVISIBLE,
+                              CL_GUI_ALV_GRID=>MC_FC_COL_OPTIMIZE,
+                              CL_GUI_ALV_GRID=>MC_FC_CURRENT_VARIANT,
+                              CL_GUI_ALV_GRID=>MC_FC_DATA_SAVE,
+                              CL_GUI_ALV_GRID=>MC_FC_DELETE_FILTER,
+                              CL_GUI_ALV_GRID=>MC_FC_DESELECT_ALL,
+                              CL_GUI_ALV_GRID=>MC_FC_DETAIL,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPCRDATA,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPCRDESIG,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPCRTEMPL,
+                              CL_GUI_ALV_GRID=>MC_FC_EXPMDB,
+                              CL_GUI_ALV_GRID=>MC_FC_EXTEND,
+                              CL_GUI_ALV_GRID=>MC_FC_F4,
+                              CL_GUI_ALV_GRID=>MC_FC_FILTER,
+                              CL_GUI_ALV_GRID=>MC_FC_FIND,
+                              CL_GUI_ALV_GRID=>MC_FC_FIX_COLUMNS,
+                              CL_GUI_ALV_GRID=>MC_FC_GRAPH,
+                              CL_GUI_ALV_GRID=>MC_FC_HELP,
+                              CL_GUI_ALV_GRID=>MC_FC_INFO,
+                              CL_GUI_ALV_GRID=>MC_FC_LOAD_VARIANT,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_COPY,
+                              CL_GUI_ALV_GRID=>MC_FC_HTML,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_UNDO,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_COPY_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_CUT,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_DELETE_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_INSERT_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_MOVE_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_APPEND_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_PASTE,
+                              CL_GUI_ALV_GRID=>MC_FC_LOC_PASTE_NEW_ROW,
+                              CL_GUI_ALV_GRID=>MC_FC_MAINTAIN_VARIANT,
+                              CL_GUI_ALV_GRID=>MC_FC_MAXIMUM,
+                              CL_GUI_ALV_GRID=>MC_FC_MINIMUM,
+                              CL_GUI_ALV_GRID=>MC_FC_PC_FILE,
+                              CL_GUI_ALV_GRID=>MC_FC_PRINT,
+                              CL_GUI_ALV_GRID=>MC_FC_PRINT_BACK,
+                              CL_GUI_ALV_GRID=>MC_FC_PRINT_PREV,
+                              CL_GUI_ALV_GRID=>MC_FC_REFRESH,
+                              CL_GUI_ALV_GRID=>MC_FC_REPREP,
+                              CL_GUI_ALV_GRID=>MC_FC_SAVE_VARIANT,
+                              CL_GUI_ALV_GRID=>MC_FC_SELECT_ALL,
+                              CL_GUI_ALV_GRID=>MC_FC_SEND,
+                              CL_GUI_ALV_GRID=>MC_FC_SEPARATOR,
+                              CL_GUI_ALV_GRID=>MC_FC_SORT,
+                              CL_GUI_ALV_GRID=>MC_FC_SORT_ASC,
+                              CL_GUI_ALV_GRID=>MC_FC_SORT_DSC,
+                              CL_GUI_ALV_GRID=>MC_FC_SUBTOT,
+                              CL_GUI_ALV_GRID=>MC_FC_SUM,
+                              CL_GUI_ALV_GRID=>MC_FC_TO_OFFICE,
+                              CL_GUI_ALV_GRID=>MC_FC_TO_REP_TREE,
+                              CL_GUI_ALV_GRID=>MC_FC_UNFIX_COLUMNS,
+                              CL_GUI_ALV_GRID=>MC_FC_VIEWS,
+                              CL_GUI_ALV_GRID=>MC_FC_VIEW_CRYSTAL,
+                              CL_GUI_ALV_GRID=>MC_FC_VIEW_EXCEL,
+                              CL_GUI_ALV_GRID=>MC_FC_VIEW_GRID,
+                              CL_GUI_ALV_GRID=>MC_FC_WORD_PROCESSOR.
+
+  " All button deletea
+  _APPEND_EXCLUDE_FUNCTIONS CL_GUI_ALV_GRID=>MC_FC_EXCL_ALL.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  TEST
+*&---------------------------------------------------------------------*
+FORM REFRESH_EMP_SUMMARY .
+
+  DATA:
+    "사원 중복 제거를 위한 테이블
+    LT_EMP_DISTINCT  LIKE SORTED TABLE OF GS_EMP_INPUT WITH UNIQUE KEY EMP_NUM,
+
+    "자격증 중복 제거를 위한 테이블
+    LT_CERT_DISTINCT TYPE SORTED TABLE OF ZEDUT068_0200-ZCERTI WITH UNIQUE KEY TABLE_LINE,
+    LS_CERT_DISTINCT TYPE ZEDUT068_0200,
+
+    "중복 프로젝트 제거를 위한 테이블
+    LT_PROJ_DISTINCT TYPE SORTED TABLE OF ZEDUT068_0100 WITH UNIQUE KEY ZPROJ ZMODULE ZPERIOD_S ZPERIOD_E,
+    LS_PROJ_DISTINCT TYPE ZEDUT068_0100,
+
+    "프로젝트와 기준 연도 사이의 날짜 범위를 계산하기 위한 변수
+    LV_PROJ_START    TYPE D,
+    LV_PROJ_END      TYPE D,
+    LV_YEAR_START    TYPE D,
+    LV_YEAR_END      TYPE D,
+    LV_FINAL_START   TYPE D,
+    LV_FINAL_END     TYPE D,
+
+    "중복 없이 월별로 집계하기 위한 해시 테이블
+    LT_MONTH_SET     TYPE HASHED TABLE OF D WITH UNIQUE KEY TABLE_LINE,
+
+    "월 반복문을 위한 포인터 날짜
+    LV_CURSOR        TYPE D.
+
+  "STEP 1 : 사원 중복 제거 → LT_EMP_DISTINCT
+  LOOP AT GT_FILTERED INTO GS_FILTERED.
+    READ TABLE LT_EMP_DISTINCT TRANSPORTING NO FIELDS
+                               WITH KEY EMP_NUM = GS_FILTERED-EMP_NUM.
+    IF SY-SUBRC <> 0.
+      GS_EMP_INPUT-EMP_NUM  = GS_FILTERED-EMP_NUM.
+      GS_EMP_INPUT-EMP_NAME = GS_FILTERED-EMP_NAME.
+      INSERT GS_EMP_INPUT INTO TABLE LT_EMP_DISTINCT.
+    ENDIF.
+  ENDLOOP.
+
+  "STEP 2 : 사원별 프로젝트/자격증 수집 및 집계
+  LOOP AT LT_EMP_DISTINCT INTO GS_EMP_INPUT.
+
+    "해당 사원의 프로젝트/자격증 수집
+    LOOP AT GT_FILTERED INTO GS_FILTERED WHERE EMP_NUM = GS_EMP_INPUT-EMP_NUM.
+      "프로젝트 구조 구성 및 중복 제거 테이블에 추가 ( LT_PROJ_DISTINCT 는 아래 4개 필드로 UNIQUE KEY 설정 중복 값 안들어감 )
+      LS_PROJ_DISTINCT-ZPROJ     = GS_FILTERED-PROJECT_ID.
+      LS_PROJ_DISTINCT-ZMODULE   = GS_FILTERED-MODULE.
+      LS_PROJ_DISTINCT-ZPERIOD_S = GS_FILTERED-PERIOD_START.
+      LS_PROJ_DISTINCT-ZPERIOD_E = GS_FILTERED-PERIOD_END.
+      INSERT LS_PROJ_DISTINCT INTO TABLE LT_PROJ_DISTINCT.
+
+      " 자격증 코드가 존재할 경우 중복 제거 테이블에 추가
+      IF GS_FILTERED-CERT_CODE IS NOT INITIAL.
+        INSERT GS_FILTERED-CERT_CODE INTO TABLE LT_CERT_DISTINCT. "( LT_CERT_DISTINCT는 자격증 ID 기준으로 UNIQUE KEY )
+      ENDIF.
+    ENDLOOP.
+
+    "STEP ALV EVENT DOUBLE CLICK : 선택된 사원의 저장 프로젝트와 비교하여 추가/삭제 처리
+    IF GT_PROJECT_INPUT IS NOT INITIAL AND GS_EMP_INPUT-EMP_NUM = GV_SELECTED_EMP_NUM.
+
+      "LT_PROJ_DISTINCT에 있는 프로젝트 중 SAVE에는 없는 경우: 삭제
+      LOOP AT LT_PROJ_DISTINCT INTO LS_PROJ_DISTINCT.
+        READ TABLE GT_PROJECT_INPUT TRANSPORTING NO FIELDS
+                                    WITH KEY PROJECT_ID   = LS_PROJ_DISTINCT-ZPROJ
+                                             MODULE       = LS_PROJ_DISTINCT-ZMODULE
+                                             PERIOD_START = LS_PROJ_DISTINCT-ZPERIOD_S
+                                             PERIOD_END   = LS_PROJ_DISTINCT-ZPERIOD_E.
+        IF SY-SUBRC <> 0.
+          "SAVE에는 없으므로 LT_PROJ_DISTINCT에서 삭제
+          DELETE LT_PROJ_DISTINCT WHERE ZPROJ     = LS_PROJ_DISTINCT-ZPROJ
+                                    AND ZMODULE   = LS_PROJ_DISTINCT-ZMODULE
+                                    AND ZPERIOD_S = LS_PROJ_DISTINCT-ZPERIOD_S
+                                    AND ZPERIOD_E = LS_PROJ_DISTINCT-ZPERIOD_E.
+        ENDIF.
+      ENDLOOP.
+
+      "SAVE에 있는 프로젝트 중 LT_PROJ_DISTINCT에는 없는 경우: 추가
+      LOOP AT GT_PROJECT_INPUT INTO GS_PROJECT_INPUT.
+        READ TABLE LT_PROJ_DISTINCT TRANSPORTING NO FIELDS
+                                    WITH KEY ZPROJ     = GS_PROJECT_INPUT-PROJECT_ID
+                                             ZMODULE   = GS_PROJECT_INPUT-MODULE
+                                             ZPERIOD_S = GS_PROJECT_INPUT-PERIOD_START
+                                             ZPERIOD_E = GS_PROJECT_INPUT-PERIOD_END.
+
+        IF SY-SUBRC <> 0.
+          " LT_PROJ_DISTINCT에는 없으므로 새로 추가
+          LS_PROJ_DISTINCT-ZPROJ     = GS_PROJECT_INPUT-PROJECT_ID.
+          LS_PROJ_DISTINCT-ZMODULE   = GS_PROJECT_INPUT-MODULE.
+          LS_PROJ_DISTINCT-ZPERIOD_S = GS_PROJECT_INPUT-PERIOD_START.
+          LS_PROJ_DISTINCT-ZPERIOD_E = GS_PROJECT_INPUT-PERIOD_END.
+          INSERT LS_PROJ_DISTINCT INTO TABLE LT_PROJ_DISTINCT.
+        ENDIF.
+      ENDLOOP.
+
+    ENDIF.
+
+    "STEP ALV EVENT HOT SPOT : 선택된 사원의 저장 자격증과 비교하여 추가/삭제 처리
+    IF GT_CERTI_INPUT IS NOT INITIAL AND GS_EMP_INPUT-EMP_NUM = GV_SELECTED_EMP_NUM.
+
+      "LT_PROJ_DISTINCT에 있는 프로젝트 중 SAVE에는 없는 경우: 삭제
+      LOOP AT LT_CERT_DISTINCT INTO LS_CERT_DISTINCT.
+        READ TABLE GT_CERTI_INPUT TRANSPORTING NO FIELDS
+                                  WITH KEY CERT_CODE   = LS_CERT_DISTINCT.
+        IF SY-SUBRC <> 0.
+          " SAVE에는 없으므로 LT_PROJ_DISTINCT에서 삭제
+          DELETE LT_CERT_DISTINCT WHERE TABLE_LINE = LS_CERT_DISTINCT-ZCERTI.
+        ENDIF.
+      ENDLOOP.
+
+      "SAVE에 있는 프로젝트 중 LT_PROJ_DISTINCT에는 없는 경우: 추가
+      LOOP AT GT_CERTI_INPUT INTO DATA(LS_SAVE2).
+        READ TABLE LT_CERT_DISTINCT TRANSPORTING NO FIELDS
+                                    WITH KEY TABLE_LINE = LS_SAVE2-CERT_CODE.
+        IF SY-SUBRC <> 0.
+          " LT_PROJ_DISTINCT에는 없으므로 새로 추가
+          LS_CERT_DISTINCT = LS_SAVE2-CERT_CODE.
+          INSERT LS_SAVE2-CERT_CODE INTO TABLE LT_CERT_DISTINCT.
+        ENDIF.
+      ENDLOOP.
+
+    ENDIF.
+
+    "STEP 3 : 프로젝트 월별 집계 처리
+    "기준 연도 범위 설정
+    LV_YEAR_START = PA_YEAR && '0101'.
+    LV_YEAR_END   = PA_YEAR && '1231'.
+
+    "사원의 각 프로젝트 반복
+    LOOP AT LT_PROJ_DISTINCT INTO LS_PROJ_DISTINCT.
+
+      "프로젝트 시작일, 종료일 계산 (형식 YYYYMMDD)
+      LV_PROJ_START = |{ LS_PROJ_DISTINCT-ZPERIOD_S }01|.
+      LV_PROJ_END   = COND #(
+                      WHEN LS_PROJ_DISTINCT-ZPERIOD_E IS INITIAL
+                      THEN |{ PA_YEAR }1231|
+                      ELSE |{ LS_PROJ_DISTINCT-ZPERIOD_E }01|
+                    ).
+
+      "조회연도와 프로젝트 기간이 겹치는 실제 기간 계산
+      LV_FINAL_START = COND #( WHEN LV_PROJ_START > LV_YEAR_START THEN LV_PROJ_START ELSE LV_YEAR_START ).
+      LV_FINAL_END   = COND #( WHEN LV_PROJ_END < LV_YEAR_END THEN LV_PROJ_END ELSE LV_YEAR_END ).
+
+      "겹치는 기간이 있는 경우 월별 집계
+      IF LV_FINAL_START <= LV_FINAL_END.
+
+        LV_CURSOR = LV_FINAL_START.
+
+        WHILE LV_CURSOR <= LV_FINAL_END AND LV_CURSOR <= LV_YEAR_END.
+          "위에서 LV_YEAR_END 를 조회연도1231으로 설정했기 때문에 해당연도를 벗어난 월이 되면 WHILE 종료
+
+          "중복 제거용 월단위 날짜 삽입
+          INSERT LV_CURSOR INTO TABLE LT_MONTH_SET.
+
+          "다음 달 1일 계산
+          DATA(LV_DATE) = LV_CURSOR.
+          CALL FUNCTION 'RP_CALC_DATE_IN_INTERVAL'
+            EXPORTING
+              DATE      = LV_DATE
+              DAYS      = 0
+              MONTHS    = 1
+              YEARS     = 0
+              SIGNUM    = '+'
+            IMPORTING
+              CALC_DATE = LV_CURSOR.
+
+        ENDWHILE.
+      ENDIF.
+    ENDLOOP.
+
+    "STEP 4 : 최종 월 수, 자격증 수를 사원 구조에 세팅
+    GS_EMP_INPUT-MONTH_INPUT = LINES( LT_MONTH_SET ).
+    GS_EMP_INPUT-CERT_INPUT  = LINES( LT_CERT_DISTINCT ).
+
+    APPEND GS_EMP_INPUT TO GT_EMP_INPUT.
+
+    "다음 사원 준비
+    CLEAR: LT_PROJ_DISTINCT,
+           LT_CERT_DISTINCT,
+           LT_MONTH_SET.
+
+  ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_EVENT_TOOLBAR_POPUP
+*&---------------------------------------------------------------------*
+FORM ALV_EVENT_TOOLBAR_POPUP  USING    P_E_OBJECT TYPE REF TO CL_ALV_EVENT_TOOLBAR_SET
+                                   P_E_INTERACTIVE.
+
+  DATA : LS_TOOLBAR  TYPE STB_BUTTON.
+
+  CLEAR LS_TOOLBAR.
+  MOVE 3                TO LS_TOOLBAR-BUTN_TYPE.
+  APPEND LS_TOOLBAR     TO P_E_OBJECT->MT_TOOLBAR.
+
+  CLEAR LS_TOOLBAR.
+  MOVE 'ADD_POPUP'      TO LS_TOOLBAR-FUNCTION.
+  MOVE ICON_INSERT_ROW  TO LS_TOOLBAR-ICON.
+  MOVE TEXT-T14         TO LS_TOOLBAR-QUICKINFO. "생성
+  MOVE TEXT-T14         TO LS_TOOLBAR-TEXT.      "생성
+  MOVE ' '              TO LS_TOOLBAR-DISABLED.
+  APPEND LS_TOOLBAR     TO P_E_OBJECT->MT_TOOLBAR.
+
+  MOVE 'DEL_POPUP'      TO LS_TOOLBAR-FUNCTION.
+  MOVE ICON_DELETE_ROW  TO LS_TOOLBAR-ICON.
+  MOVE TEXT-T15         TO LS_TOOLBAR-QUICKINFO. "삭제
+  MOVE TEXT-T15         TO LS_TOOLBAR-TEXT.      "삭제
+  MOVE ' '              TO LS_TOOLBAR-DISABLED.
+  APPEND LS_TOOLBAR     TO P_E_OBJECT->MT_TOOLBAR.
+
+  MOVE 'SAVE_POPUP'     TO LS_TOOLBAR-FUNCTION.
+  MOVE ICON_SYSTEM_SAVE TO LS_TOOLBAR-ICON.
+  MOVE TEXT-T16         TO LS_TOOLBAR-QUICKINFO. "저장
+  MOVE TEXT-T16         TO LS_TOOLBAR-TEXT.      "저장
+  MOVE ' '              TO LS_TOOLBAR-DISABLED.
+  APPEND LS_TOOLBAR     TO P_E_OBJECT->MT_TOOLBAR.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_DATA_CHANGED01
+*&---------------------------------------------------------------------*
+FORM ALV_DATA_CHANGED01  USING    P_ER_DATA_CHANGED TYPE REF TO CL_ALV_CHANGED_DATA_PROTOCOL.
+
+  DATA: LT_MOD_CELLS    TYPE LVC_T_MODI,
+        LS_MOD_CELL     TYPE LVC_S_MODI,
+        LV_PROJ_ID      TYPE ZEDUT068_0100-ZPROJ,
+        LV_PROJ_NAME    TYPE ZEDUT068_0020-ZNAME2,
+
+        LV_PERIOD_START TYPE CHAR6,
+        LV_PERIOD_END   TYPE CHAR6,
+        LV_MONTH        TYPE I,
+        LV_SUBSTR       TYPE CHAR2,
+
+        LT_DDVAL        TYPE TABLE OF DD07V,
+        LS_DDVAL        TYPE DD07V,
+        LV_MODULE       TYPE ZEDUT068_0100-ZMODULE,
+        LT_MODULES      TYPE TABLE OF ZEDUT068_0100-ZMODULE.
+
+  "MODULE FIX VALUE 가져오기
+  CALL FUNCTION 'DD_DOMVALUES_GET'
+    EXPORTING
+      DOMNAME       = 'Z068D_MODULE'
+      LANGU         = SY-LANGU
+    TABLES
+      DD07V_TAB     = LT_DDVAL
+    EXCEPTIONS
+      ILLEGAL_INPUT = 1
+      OTHERS        = 2.
+  IF SY-SUBRC = 0.
+    LOOP AT LT_DDVAL INTO LS_DDVAL.
+      IF LS_DDVAL-DOMVALUE_L IS NOT INITIAL.
+        APPEND LS_DDVAL-DOMVALUE_L TO LT_MODULES.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  "변경된 셀 정보 복사
+  CLEAR LT_MOD_CELLS.
+  LOOP AT P_ER_DATA_CHANGED->MT_MOD_CELLS INTO DATA(LS_TMP).
+    APPEND LS_TMP TO LT_MOD_CELLS.
+  ENDLOOP.
+
+  "각 변경된 셀에 대해 필드별 유효성 검사 및 후처리
+  LOOP AT LT_MOD_CELLS INTO LS_MOD_CELL.
+
+    CASE LS_MOD_CELL-FIELDNAME.
+
+        "프로젝트 ID CHECK : 존재 여부 및 프로젝트명 자동 반영
+      WHEN 'PROJECT_ID'.
+        LV_PROJ_ID = LS_MOD_CELL-VALUE.
+        CLEAR LV_PROJ_NAME.
+
+        "GT_MAIN 테이블에서 프로젝트 ID 존재 확인
+        READ TABLE GT_MAIN WITH KEY PROJECT_ID = LV_PROJ_ID TRANSPORTING NO FIELDS.
+        IF SY-SUBRC <> 0.
+          MESSAGE |프로젝트 ID { LV_PROJ_ID } 가 존재하지 않습니다.| TYPE 'S' DISPLAY LIKE 'E'.
+
+          "잘못된 값 제거
+          CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+            EXPORTING
+              I_ROW_ID    = LS_MOD_CELL-ROW_ID
+              I_FIELDNAME = 'PROJECT_ID'
+              I_VALUE     = ''.
+          CONTINUE.
+        ENDIF.
+
+        "프로젝트 이름 갱신
+        LOOP AT GT_MAIN INTO GS_MAIN WHERE PROJECT_ID = LV_PROJ_ID.
+          LV_PROJ_NAME = GS_MAIN-PROJECT_NAME.
+          EXIT.
+        ENDLOOP.
+
+        "PROJECT_NAME 필드에 값 반영
+        CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+          EXPORTING
+            I_ROW_ID    = LS_MOD_CELL-ROW_ID
+            I_FIELDNAME = 'PROJECT_NAME'
+            I_VALUE     = LV_PROJ_NAME.
+
+        "MODULE 값 도메인 허용 여부 CHEKC
+      WHEN 'MODULE'.
+        LV_MODULE = LS_MOD_CELL-VALUE.
+
+        "허용값에 없는 경우 오류 메시지 후 삭제
+        READ TABLE LT_MODULES WITH KEY TABLE_LINE = LV_MODULE TRANSPORTING NO FIELDS.
+        IF SY-SUBRC <> 0.
+          MESSAGE |MODULE 값 { LV_MODULE } 은(는) 허용되지 않는 값입니다.| TYPE 'S' DISPLAY LIKE 'E'.
+          CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+            EXPORTING
+              I_ROW_ID    = LS_MOD_CELL-ROW_ID
+              I_FIELDNAME = 'MODULE'
+              I_VALUE     = ''.
+          CONTINUE.
+        ENDIF.
+
+        "투입월(PERIOD_START) 포맷 및 월 유효성 검사
+      WHEN 'PERIOD_START'.
+        LV_PERIOD_START = LS_MOD_CELL-VALUE.
+
+        "6자리 숫자 CHECK
+        IF STRLEN( LV_PERIOD_START ) <> 6 OR LV_PERIOD_START CP '[^0-9]'.
+          MESSAGE TEXT-E08 TYPE 'S' DISPLAY LIKE 'E'. "투입/종료월은 6자리 숫자여야 합니다.
+          CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+            EXPORTING
+              I_ROW_ID    = LS_MOD_CELL-ROW_ID
+              I_FIELDNAME = 'PERIOD_START'
+              I_VALUE     = ''.
+          CONTINUE.
+        ENDIF.
+
+        "5~6번째 자리가 월인지 CHECK
+        LV_SUBSTR = LV_PERIOD_START+4(2).
+        LV_MONTH = CONV I( LV_SUBSTR ).
+
+        IF LV_MONTH < 1 OR LV_MONTH > 12.
+          MESSAGE TEXT-E09 TYPE 'S' DISPLAY LIKE 'E'. "투입/종료월 01~12월 사이여야 합니다.
+
+          CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+            EXPORTING
+              I_ROW_ID    = LS_MOD_CELL-ROW_ID
+              I_FIELDNAME = 'PERIOD_START'
+              I_VALUE     = ''.
+          CONTINUE.
+        ENDIF.
+
+        "종료월(PERIOD_END) 포맷 및 월 유효성 검사
+      WHEN 'PERIOD_END'.
+        LV_PERIOD_END = LS_MOD_CELL-VALUE.
+
+        "6자리 숫자 CHECK
+        IF STRLEN( LV_PERIOD_END ) <> 6 OR LV_PERIOD_END CP '[^0-9]'.
+          MESSAGE TEXT-E08 TYPE 'S' DISPLAY LIKE 'E'. "투입/종료월은 6자리 숫자여야 합니다.
+          CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+            EXPORTING
+              I_ROW_ID    = LS_MOD_CELL-ROW_ID
+              I_FIELDNAME = 'PERIOD_END'
+              I_VALUE     = ''.
+          CONTINUE.
+        ENDIF.
+
+        "월 범위 검사
+        LV_SUBSTR = LV_PERIOD_END+4(2).
+        LV_MONTH = CONV I( LV_SUBSTR ).
+
+        IF LV_MONTH < 1 OR LV_MONTH > 12.
+          MESSAGE TEXT-E09 TYPE 'S' DISPLAY LIKE 'E'. "투입/종료월 01~12월 사이여야 합니다.
+
+          CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+            EXPORTING
+              I_ROW_ID    = LS_MOD_CELL-ROW_ID
+              I_FIELDNAME = 'PERIOD_END'
+              I_VALUE     = ''.
+          CONTINUE.
+        ENDIF.
+    ENDCASE.
+
+  ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_DATA_CHANGED_POPUP
+*&---------------------------------------------------------------------*
+FORM ALV_DATA_CHANGED_POPUP  USING    P_ER_DATA_CHANGED TYPE REF TO CL_ALV_CHANGED_DATA_PROTOCOL.
+
+  DATA: LT_MOD_CELLS TYPE LVC_T_MODI,
+        LS_MOD_CELL  TYPE LVC_S_MODI,
+        LV_CERT_ID   TYPE ZEDUT068_0200-ZCERTI,
+        LV_CERT_NAME TYPE ZEDUT068_0040-ZNAME4.
+
+  "변경된 셀 정보 복사
+  CLEAR LT_MOD_CELLS.
+  LOOP AT P_ER_DATA_CHANGED->MT_MOD_CELLS INTO DATA(LS_TMP).
+    APPEND LS_TMP TO LT_MOD_CELLS.
+  ENDLOOP.
+
+  "변경 셀 순회하여 CERT_CODE 검사 및 CERT_NAME 자동 반영
+  LOOP AT LT_MOD_CELLS INTO LS_MOD_CELL.
+    IF LS_MOD_CELL-FIELDNAME = 'CERT_CODE'.
+
+      "입력된 자격증 코드 추출
+      LV_CERT_ID = LS_MOD_CELL-VALUE.
+      CLEAR LV_CERT_NAME.
+
+      "GT_MAIN에서 CERT_CODE 존재 여부 확인
+      READ TABLE GT_MAIN WITH KEY CERT_CODE = LV_CERT_ID TRANSPORTING NO FIELDS.
+      IF SY-SUBRC <> 0.
+        "존재하지 않으면 사용자에게 메시지 출력
+        MESSAGE |자격증 코드 { LV_CERT_ID } 가 존재하지 않습니다.| TYPE 'S' DISPLAY LIKE 'E'.
+
+        "잘못된 CERT_CODE 값 제거
+        CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+          EXPORTING
+            I_ROW_ID    = LS_MOD_CELL-ROW_ID
+            I_FIELDNAME = 'CERT_CODE'
+            I_VALUE     = ''.
+
+        "CERT_NAME도 함께 초기화
+        CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+          EXPORTING
+            I_ROW_ID    = LS_MOD_CELL-ROW_ID
+            I_FIELDNAME = 'CERT_NAME'
+            I_VALUE     = ''.
+
+        CONTINUE.
+      ENDIF.
+
+      "자격증 이름 갱신
+      LOOP AT GT_MAIN INTO GS_MAIN WHERE CERT_CODE = LV_CERT_ID.
+        LV_CERT_NAME = GS_MAIN-CERT_NAME.
+        EXIT.
+      ENDLOOP.
+
+      "CERT_NAME 필드에 자동 반영
+      CALL METHOD P_ER_DATA_CHANGED->MODIFY_CELL
+        EXPORTING
+          I_ROW_ID    = LS_MOD_CELL-ROW_ID
+          I_FIELDNAME = 'CERT_NAME'
+          I_VALUE     = LV_CERT_NAME.
+
+    ENDIF.
+  ENDLOOP.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ALV_ONF4
+*&---------------------------------------------------------------------*
+FORM ALV_ONF4  USING   P_E_FIELDNAME
+                        P_E_FIELDVALUE
+                        P_ES_ROW_NO     TYPE LVC_S_ROID
+                        P_ER_EVENT_DATA TYPE REF TO CL_ALV_EVENT_DATA
+                        P_ET_BAD_CELLS  TYPE LVC_T_MODI
+                        P_E_DISPLAY.
+
+  "필드 심볼 및 기본 변수, 테이블 선언
+  DATA: LV_VALUE      TYPE C LENGTH 10,                     "최종 선택값
+        LV_FIELDNAME  TYPE HELP_INFO-DYNPROFLD,             "현재 필드명
+        LT_RETURN_TAB TYPE STANDARD TABLE OF DDSHRETVAL,    "F4 결과 테이블
+        LS_RETURN     TYPE DDSHRETVAL,                      "F4 결과 단일 항목
+        LV_MONTH      TYPE ISELLIST-MONTH,                  "현재 월
+
+        "프로젝트ID 필드 F4 용 테이블 및 구조
+        BEGIN OF LS_PROJ,
+          PROJECT_ID TYPE ZEDUT068_0020-ZPROJ,
+        END OF LS_PROJ,
+        LT_PROJ LIKE STANDARD TABLE OF LS_PROJ WITH EMPTY KEY,
+
+        "MODULE 필드 F4 용 테이블 및 구조
+        BEGIN OF LS_MODULE,
+          MODULE TYPE ZEDUT068_0100-ZMODULE,
+        END OF LS_MODULE,
+        LT_MODULE LIKE STANDARD TABLE OF LS_MODULE WITH EMPTY KEY,
+
+        "자격증 필드 F4 용 테이블 및 구조
+        BEGIN OF LS_CERT,
+          CERT_CODE TYPE ZEDUT068_0040-ZCERTI,
+          CERT_NAME TYPE ZEDUT068_0040-ZNAME4,
+        END OF LS_CERT,
+
+        LT_CERT LIKE STANDARD TABLE OF LS_CERT WITH EMPTY KEY.
+
+  FIELD-SYMBOLS <LS_MODI> TYPE LVC_T_MODI.      "ALV 변경값 테이블용 필드 심볼
+  P_ER_EVENT_DATA->M_EVENT_HANDLED = ABAP_TRUE. "이벤트 기본 처리 방지 (커스터마이징 적용)
+
+  LV_FIELDNAME = P_E_FIELDNAME. "필드명 저장
+
+  CASE P_E_FIELDNAME.
+    WHEN 'PROJECT_ID'.
+
+      "GT_MAIN 에서 중복되지 않는 프로젝트 ID만 추출
+      LOOP AT GT_MAIN ASSIGNING FIELD-SYMBOL(<LS_MAIN>).
+        READ TABLE LT_PROJ TRANSPORTING NO FIELDS
+                           WITH KEY PROJECT_ID = <LS_MAIN>-PROJECT_ID.
+        IF SY-SUBRC <> 0.
+          APPEND VALUE #( PROJECT_ID = <LS_MAIN>-PROJECT_ID ) TO LT_PROJ.
+        ENDIF.
+      ENDLOOP.
+
+      SORT LT_PROJ BY PROJECT_ID.
+
+      "팝업 호출 (내부 테이블 기반 F4)
+      CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+        EXPORTING
+          RETFIELD    = 'PROJECT_ID'
+          DYNPPROG    = SY-REPID
+          DYNPNR      = SY-DYNNR
+          DYNPROFIELD = LV_FIELDNAME
+          VALUE_ORG   = 'S'
+        TABLES
+          VALUE_TAB   = LT_PROJ
+          RETURN_TAB  = LT_RETURN_TAB.
+
+      "팝업 결과값에서 선택값 가져오기
+      READ TABLE LT_RETURN_TAB INTO LS_RETURN INDEX 1.
+      IF SY-SUBRC = 0.
+        LV_VALUE = LS_RETURN-FIELDVAL.
+      ENDIF.
+
+    WHEN 'MODULE'.
+
+      "GT_MAIN에서 중복 제거된 MODULE 추출
+      LOOP AT GT_MAIN ASSIGNING <LS_MAIN>.
+        READ TABLE LT_MODULE TRANSPORTING NO FIELDS
+                             WITH KEY MODULE = <LS_MAIN>-MODULE.
+        IF SY-SUBRC <> 0.
+          APPEND VALUE #( MODULE = <LS_MAIN>-MODULE ) TO LT_MODULE.
+        ENDIF.
+      ENDLOOP.
+
+      SORT LT_MODULE BY MODULE.
+
+      "팝업 호출 (내부 테이블 기반 F4)
+      CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+        EXPORTING
+          RETFIELD    = 'MODULE'
+          DYNPPROG    = SY-REPID
+          DYNPNR      = SY-DYNNR
+          DYNPROFIELD = LV_FIELDNAME
+          VALUE_ORG   = 'S'
+        TABLES
+          VALUE_TAB   = LT_MODULE
+          RETURN_TAB  = LT_RETURN_TAB.
+
+      "팝업 결과값에서 선택값 가져오기
+      READ TABLE LT_RETURN_TAB INTO LS_RETURN INDEX 1.
+      IF SY-SUBRC = 0.
+        LV_VALUE = LS_RETURN-FIELDVAL.
+      ENDIF.
+
+      "투입/종료월 선택 팝업
+    WHEN 'PERIOD_START' OR 'PERIOD_END'.
+
+      LV_MONTH = SY-DATUM(6). "기본값 = 현재 월 (YYYYMM)
+
+      "월 선택 팝업 호출
+      CALL FUNCTION 'POPUP_TO_SELECT_MONTH'
+        EXPORTING
+          ACTUAL_MONTH   = LV_MONTH
+        IMPORTING
+          SELECTED_MONTH = LV_MONTH.
+
+      LV_VALUE = LV_MONTH.
+
+      "자격증 코드 선택 팝업 (CERT_CODE + CERT_NAME)
+    WHEN 'CERT_CODE'.
+
+      "GT_MAIN에서 CERT_CODE 중복 제거
+      LOOP AT GT_MAIN ASSIGNING <LS_MAIN>.
+        IF <LS_MAIN>-CERT_CODE IS INITIAL.
+          CONTINUE.
+        ENDIF.
+
+        READ TABLE LT_CERT TRANSPORTING NO FIELDS
+                           WITH KEY CERT_CODE = <LS_MAIN>-CERT_CODE.
+        IF SY-SUBRC <> 0.
+          APPEND VALUE #(
+          CERT_CODE = <LS_MAIN>-CERT_CODE
+          CERT_NAME = <LS_MAIN>-CERT_NAME
+          ) TO LT_CERT.
+        ENDIF.
+      ENDLOOP.
+
+      SORT LT_CERT BY CERT_CODE.
+
+      "팝업 호출 (내부 테이블 기반 F4)
+      CALL FUNCTION 'F4IF_INT_TABLE_VALUE_REQUEST'
+        EXPORTING
+          RETFIELD    = 'CERT_CODE'
+          DYNPPROG    = SY-REPID
+          DYNPNR      = SY-DYNNR
+          DYNPROFIELD = LV_FIELDNAME
+          VALUE_ORG   = 'S'
+        TABLES
+          VALUE_TAB   = LT_CERT
+          RETURN_TAB  = LT_RETURN_TAB.
+
+      "팝업 결과값에서 선택값 가져오기
+      READ TABLE LT_RETURN_TAB INTO LS_RETURN INDEX 1.
+      IF SY-SUBRC = 0.
+        LV_VALUE = LS_RETURN-FIELDVAL.
+      ENDIF.
+
+  ENDCASE.
+
+  "최종적으로 선택된 값을 ALV 셀에 반영
+  IF P_E_FIELDNAME = 'PERIOD_START' OR P_E_FIELDNAME = 'PERIOD_END'."투입,종료월 일 경우
+    "바로 ALV 셀에 반영
+    ASSIGN P_ER_EVENT_DATA->M_DATA->* TO <LS_MODI>.
+
+    DATA(LS_MODI_PERIOD) = VALUE LVC_S_MODI(
+                      ROW_ID    = P_ES_ROW_NO-ROW_ID
+                      FIELDNAME = P_E_FIELDNAME
+                      VALUE     = LV_VALUE ).
+    APPEND LS_MODI_PERIOD TO <LS_MODI>.
+
+  ELSE.
+
+    "팝업 선택된 값이 있을 경우에만 적용 (GT_MAIN 기반 F4의 경우)
+    READ TABLE LT_RETURN_TAB INTO LS_RETURN INDEX 1.
+    IF SY-SUBRC = 0 AND LS_RETURN-FIELDVAL IS NOT INITIAL.
+
+      LV_VALUE = LS_RETURN-FIELDVAL.
+
+      ASSIGN P_ER_EVENT_DATA->M_DATA->* TO <LS_MODI>.
+
+      DATA(LS_MODI) = VALUE LVC_S_MODI(
+                        ROW_ID    = P_ES_ROW_NO-ROW_ID
+                        FIELDNAME = P_E_FIELDNAME
+                        VALUE     = LV_VALUE ).
+      APPEND LS_MODI TO <LS_MODI>.
+
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_CONTAINER_POPUP
+*&---------------------------------------------------------------------*
+FORM SET_CONTAINER_POPUP .
+
+  IF GO_CONTAINER_POPUP IS INITIAL.
+    CREATE OBJECT GO_CONTAINER_POPUP
+      EXPORTING
+        REPID     = SY-CPROG
+        DYNNR     = SY-DYNNR
+        SIDE      = GO_CONTAINER_POPUP->DOCK_AT_TOP
+        EXTENSION = 2000.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_GRID_POPUP
+*&---------------------------------------------------------------------*
+FORM SET_GRID_POPUP .
+
+  IF GO_GRID_POPUP IS INITIAL.
+
+    CREATE OBJECT GO_GRID_POPUP
+      EXPORTING
+        I_PARENT = GO_CONTAINER_POPUP.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_ALV_LAYOUT_POPUP
+*&---------------------------------------------------------------------*
+FORM SET_ALV_LAYOUT_POPUP  CHANGING P_GS_LAYOUT_POPUP.
+
+  GS_LAYOUT_POPUP-CWIDTH_OPT = GC_A.
+  GS_LAYOUT_POPUP-SEL_MODE   = GC_B.
+  GS_LAYOUT_POPUP-SMALLTITLE = GC_X.
+  GS_LAYOUT_POPUP-GRID_TITLE = TEXT-T11. "자격증 취득현황
+
+  GS_VARIANT-REPORT = SY-CPROG.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_EVENT_POPUP
+*&---------------------------------------------------------------------*
+FORM SET_EVENT_POPUP  CHANGING P_GO_EVENT_RECEIVER.
+
+  DATA(LT_F4) = VALUE LVC_T_F4(
+  ( REGISTER = GC_X FIELDNAME = 'CERT_CODE') ).
+
+  CALL METHOD GO_GRID_POPUP->REGISTER_F4_FOR_FIELDS
+    EXPORTING
+      IT_F4 = LT_F4[].
+
+  IF GO_GRID_POPUP IS BOUND.
+
+    CALL METHOD GO_GRID_POPUP->SET_READY_FOR_INPUT
+      EXPORTING
+        I_READY_FOR_INPUT = 1.
+
+    CALL METHOD GO_GRID_POPUP->REGISTER_EDIT_EVENT
+      EXPORTING
+        I_EVENT_ID = CL_GUI_ALV_GRID=>MC_EVT_MODIFIED.
+
+    SET HANDLER: GO_EVENT_RECEIVER->HANDLE_TOOLBAR         FOR GO_GRID_POPUP,
+                 GO_EVENT_RECEIVER->HANDLE_DATA_CHANGED    FOR GO_GRID_POPUP,
+                 GO_EVENT_RECEIVER->HANDLE_ONF4            FOR GO_GRID_POPUP,
+                 GO_EVENT_RECEIVER->HANDLE_USER_COMMAND    FOR GO_GRID_POPUP.
+  ENDIF.
+
+  CALL METHOD GO_GRID_POPUP->SET_READY_FOR_INPUT
+    EXPORTING
+      I_READY_FOR_INPUT = 1.
+
+  CALL METHOD GO_GRID_POPUP->REGISTER_EDIT_EVENT
+    EXPORTING
+      I_EVENT_ID = CL_GUI_ALV_GRID=>MC_EVT_MODIFIED.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SET_ALV_FIELDCAT_POPUP
+*&---------------------------------------------------------------------*
+FORM SET_ALV_FIELDCAT_POPUP  TABLES P_GT_FIELDCAT_POPUP STRUCTURE LVC_S_FCAT.
+
+  REFRESH GT_FIELDCAT_POPUP.
+
+  DATA : LS_FIELDCAT LIKE LINE OF GT_FIELDCAT_POPUP.
+
+  LS_FIELDCAT-FIELDNAME = 'CERT_CODE'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T12. "자격증코드
+  LS_FIELDCAT-EDIT      = GC_X.
+  LS_FIELDCAT-F4AVAILABL = GC_X.
+  LS_FIELDCAT-COL_POS   = 10.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT_POPUP. CLEAR LS_FIELDCAT.
+
+  LS_FIELDCAT-FIELDNAME = 'CERT_NAME'.
+  LS_FIELDCAT-COLTEXT   = TEXT-T13. "자격증명
+  LS_FIELDCAT-COL_POS   = 20.
+  APPEND LS_FIELDCAT TO GT_FIELDCAT_POPUP. CLEAR LS_FIELDCAT.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DISPALY_ALV_POPUP
+*&---------------------------------------------------------------------*
+FORM DISPALY_ALV_POPUP  TABLES   P_GT_FIELDCAT_POPUP STRUCTURE LVC_S_FCAT
+                                 P_GT_SORT
+                                 P_GT_EXCLUDE_POPUP
+                        USING    P_GS_LAYOUT_POPUP.
+
+  CALL METHOD GO_GRID_POPUP->SET_TABLE_FOR_FIRST_DISPLAY(
+    EXPORTING
+      IS_LAYOUT            = GS_LAYOUT_POPUP
+      I_SAVE               = GC_A
+      IT_TOOLBAR_EXCLUDING = GT_EXCLUDE_POPUP[]
+      IS_VARIANT           = GS_VARIANT
+    CHANGING
+      IT_OUTTAB            = GT_CERTI_INPUT[]
+      IT_FIELDCATALOG      = GT_FIELDCAT_POPUP ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ADD_PROJECT_ROW
+*&---------------------------------------------------------------------*
+FORM ADD_PROJECT_ROW .
+
+  CLEAR GS_PROJECT_INPUT.
+  INSERT GS_PROJECT_INPUT INTO GT_PROJECT_INPUT INDEX 1.
+
+  CALL METHOD GO_GRID02->REFRESH_TABLE_DISPLAY
+    EXPORTING
+      IS_STABLE = VALUE LVC_S_STBL( ROW = 'X' COL = 'X' ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  ADD_CERTI_ROW
+*&---------------------------------------------------------------------*
+FORM ADD_CERTI_ROW .
+
+  CLEAR GS_CERTI_INPUT.
+  INSERT GS_CERTI_INPUT INTO GT_CERTI_INPUT INDEX 1.
+
+  CALL METHOD GO_GRID_POPUP->REFRESH_TABLE_DISPLAY
+    EXPORTING
+      IS_STABLE = VALUE LVC_S_STBL( ROW = 'X' COL = 'X' ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DELETE_PROJECT_ROWS
+*&---------------------------------------------------------------------*
+FORM DELETE_PROJECT_ROWS.
+
+  DATA: LT_ROWS TYPE LVC_T_ROW,
+        LS_ROW  TYPE LVC_S_ROW,
+        LV_IDX  TYPE SY-TABIX.
+
+  CALL METHOD GO_GRID02->GET_SELECTED_ROWS
+    IMPORTING
+      ET_INDEX_ROWS = LT_ROWS.
+
+  SORT LT_ROWS BY INDEX DESCENDING. "삭제시 뒤부터 삭제
+  LOOP AT LT_ROWS INTO LS_ROW.
+    LV_IDX = LS_ROW-INDEX.
+    DELETE GT_PROJECT_INPUT INDEX LV_IDX.
+  ENDLOOP.
+
+  CALL METHOD GO_GRID02->REFRESH_TABLE_DISPLAY
+    EXPORTING
+      IS_STABLE = VALUE LVC_S_STBL( ROW = 'X' COL = 'X' ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  DELETE_CERTI_ROWS
+*&---------------------------------------------------------------------*
+FORM DELETE_CERTI_ROWS .
+
+  DATA: LT_ROWS TYPE LVC_T_ROW,
+        LS_ROW  TYPE LVC_S_ROW,
+        LV_IDX  TYPE SY-TABIX.
+
+  CALL METHOD GO_GRID_POPUP->GET_SELECTED_ROWS
+    IMPORTING
+      ET_INDEX_ROWS = LT_ROWS.
+
+  SORT LT_ROWS BY INDEX DESCENDING. "삭제시 뒤부터 삭제
+  LOOP AT LT_ROWS INTO LS_ROW.
+    LV_IDX = LS_ROW-INDEX.
+    DELETE GT_CERTI_INPUT INDEX LV_IDX.
+  ENDLOOP.
+
+  CALL METHOD GO_GRID_POPUP->REFRESH_TABLE_DISPLAY
+    EXPORTING
+      IS_STABLE = VALUE LVC_S_STBL( ROW = 'X' COL = 'X' ).
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SAVE_PROJECT_DATA
+*&---------------------------------------------------------------------*
+FORM SAVE_PROJECT_DATA .
+
+  DATA: LT_ROWS    TYPE LVC_T_ROW,
+        LS_ROW     TYPE LVC_S_ROW,
+        LV_IDX     TYPE SY-TABIX,
+        LV_BEFORE  TYPE N,
+        LV_AFTER   TYPE N,
+        LT_DEL_IDX TYPE STANDARD TABLE OF SY-TABIX WITH EMPTY KEY.
+
+  DATA :
+    "신규 저장 및 삭제 대상 구조 선언
+    LT_INSERT TYPE TABLE OF ZEDUT068_0100,
+    LT_DELETE TYPE TABLE OF ZEDUT068_0100,
+    LS_SAVE   TYPE ZEDUT068_0100,
+    LS_NEW    LIKE LINE OF GT_PROJECT_INPUT.
+
+  "삭제 전 행 개수 저장
+  LV_BEFORE = LINES( GT_PROJECT_INPUT ).
+
+  "중복 제거를 위한 정렬
+  SORT GT_PROJECT_INPUT BY PROJECT_ID MODULE PERIOD_START PERIOD_END.
+
+  "동일 키 기준 중복 제거
+  DELETE ADJACENT DUPLICATES FROM GT_PROJECT_INPUT COMPARING PROJECT_ID MODULE PERIOD_START PERIOD_END.
+
+  "삭제 후 행 개수 저장
+  LV_AFTER = LINES( GT_PROJECT_INPUT ).
+
+  "중복 제거된 경우 사용자에게 메시지 출력 후 리턴
+  IF LV_AFTER < LV_BEFORE.
+    MESSAGE TEXT-E04 TYPE 'S' DISPLAY LIKE 'E'. "중복된 행을 제거했습니다.
+    CALL METHOD GO_GRID02->REFRESH_TABLE_DISPLAY.
+    RETURN.
+  ENDIF.
+
+  "GT_PROJECT_INPUT을 순회하며 신규/중복/오류 체크
+  LOOP AT GT_PROJECT_INPUT INTO LS_NEW.
+
+    LV_IDX = SY-TABIX.
+
+    "필수 항목 누락 여부 CHECK
+    IF LS_NEW-PROJECT_ID IS INITIAL OR
+       LS_NEW-MODULE     IS INITIAL OR
+       LS_NEW-PERIOD_START IS INITIAL.
+      MESSAGE TEXT-E03 TYPE 'S' DISPLAY LIKE 'E'. "프로젝트ID / 모듈 / 투입월 중 누락된 항목이 있습니다.
+      RETURN.
+
+      "투입월이 종료월보다 늦은 경우 오류 메시지
+    ELSEIF LS_NEW-PERIOD_END IS NOT INITIAL AND
+           LS_NEW-PERIOD_START > LS_NEW-PERIOD_END.
+      MESSAGE TEXT-E05 TYPE 'S' DISPLAY LIKE 'E'. "투입월이 종료월보다 느릴 수 없습니다.
+      RETURN.
+    ENDIF.
+
+    "기존 저장된 데이터에 동일한 행이 있는지 체크
+    READ TABLE GT_PROJECT_INPUT_SAVE TRANSPORTING NO FIELDS
+                                     WITH KEY PROJECT_ID   = LS_NEW-PROJECT_ID
+                                              PROJECT_NAME = LS_NEW-PROJECT_NAME
+                                              MODULE       = LS_NEW-MODULE
+                                              PERIOD_START = LS_NEW-PERIOD_START
+                                              PERIOD_END   = LS_NEW-PERIOD_END.
+    IF SY-SUBRC <> 0.
+
+      "GT_MAIN에도 동일한 행이 있는 경우 중복이므로 삭제 인덱스 추가
+      READ TABLE GT_MAIN TRANSPORTING NO FIELDS
+                         WITH KEY EMP_NUM = GV_SELECTED_EMP_NUM
+                                  PROJECT_NAME = LS_NEW-PROJECT_NAME
+                                  MODULE       = LS_NEW-MODULE
+                                  PERIOD_START = LS_NEW-PERIOD_START
+                                  PERIOD_END   = LS_NEW-PERIOD_END.
+      IF SY-SUBRC = 0.
+        APPEND LV_IDX TO LT_DEL_IDX.
+
+      ELSE.
+        "신규 데이터 저장 구조로 변환 후 INSERT 대상 테이블에 추가
+        CLEAR LS_SAVE.
+        LS_SAVE-ZEMP      = GV_SELECTED_EMP_NUM.
+        LS_SAVE-ZPROJ     = LS_NEW-PROJECT_ID.
+        LS_SAVE-ZMODULE   = LS_NEW-MODULE.
+        LS_SAVE-ZPERIOD_S = LS_NEW-PERIOD_START.
+        LS_SAVE-ZPERIOD_E = LS_NEW-PERIOD_END.
+        LS_SAVE-AMOUNT    = LS_NEW-PROJECT_AMOUNT.
+        LS_SAVE-ERDAT = SY-DATUM.
+        LS_SAVE-ERZET = SY-UZEIT.
+        LS_SAVE-ERNAM = SY-UNAME.
+
+        APPEND LS_SAVE TO LT_INSERT.
+      ENDIF.
+    ENDIF.
+
+  ENDLOOP.
+
+  "중복된 행이 있으면 삭제하고 메시지 출력
+  IF LT_DEL_IDX IS NOT INITIAL.
+    MESSAGE TEXT-E06 TYPE 'S' DISPLAY LIKE 'E'. "이미 DB에 존재하는 행은 삭제했습니다.
+
+    LOOP AT LT_DEL_IDX INTO DATA(LV_DEL).
+      DELETE GT_PROJECT_INPUT INDEX LV_DEL.
+    ENDLOOP.
+
+    "ALV 갱신 후 리턴
+    CALL METHOD GO_GRID02->REFRESH_TABLE_DISPLAY
+      EXPORTING
+        IS_STABLE = VALUE LVC_S_STBL( ROW = 'X' COL = 'X' ).
+    RETURN.
+  ENDIF.
+
+
+  "DELETE 대상 찾기: 기존엔 있었지만 현재 입력에 없는 행
+  LOOP AT GT_PROJECT_INPUT_SAVE INTO DATA(LS_OLD).
+
+    READ TABLE GT_PROJECT_INPUT TRANSPORTING NO FIELDS
+                                WITH KEY PROJECT_ID   = LS_OLD-PROJECT_ID
+                                         PROJECT_NAME = LS_OLD-PROJECT_NAME
+                                         MODULE       = LS_OLD-MODULE
+                                         PERIOD_START = LS_OLD-PERIOD_START
+                                         PERIOD_END   = LS_OLD-PERIOD_END.
+    IF SY-SUBRC <> 0.
+      CLEAR LS_SAVE.
+      LS_SAVE-ZEMP      = GV_SELECTED_EMP_NUM.
+      LS_SAVE-ZPROJ     = LS_OLD-PROJECT_ID.
+      LS_SAVE-ZMODULE   = LS_OLD-MODULE.
+      LS_SAVE-ZPERIOD_S = LS_OLD-PERIOD_START.
+      LS_SAVE-ZPERIOD_E = LS_OLD-PERIOD_END.
+      LS_SAVE-AMOUNT    = LS_OLD-PROJECT_AMOUNT.
+      APPEND LS_SAVE TO LT_DELETE.
+    ENDIF.
+  ENDLOOP.
+
+  "실제 DB와 로직 DB(GT_MAIN)에 INSERT 처리
+  IF LT_INSERT IS NOT INITIAL.
+    "실제 DB INSERT
+    INSERT ZEDUT068_0100 FROM TABLE LT_INSERT.
+
+    "로직 DB INSERT
+    LOOP AT LT_INSERT INTO LS_SAVE.
+      CLEAR GS_MAIN.
+      GS_MAIN-EMP_NUM       = LS_SAVE-ZEMP.
+      GS_MAIN-PROJECT_ID    = LS_SAVE-ZPROJ.
+      GS_MAIN-MODULE        = LS_SAVE-ZMODULE.
+      GS_MAIN-PERIOD_START  = LS_SAVE-ZPERIOD_S.
+      GS_MAIN-PERIOD_END    = LS_SAVE-ZPERIOD_E.
+
+      "프로젝트명 INSERT
+      READ TABLE GT_MAIN INTO DATA(LS_MAIN) WITH KEY PROJECT_ID = LS_SAVE-ZPROJ.
+      IF SY-SUBRC = 0.
+        GS_MAIN-PROJECT_NAME = LS_MAIN-PROJECT_NAME.
+      ENDIF.
+
+      APPEND GS_MAIN TO GT_MAIN.
+    ENDLOOP.
+  ENDIF.
+
+  "실제 DB와 로직 DB(GT_MAIN)에 DELETE 처리
+  IF LT_DELETE IS NOT INITIAL.
+    "실제 DB DELETE
+    DELETE ZEDUT068_0100 FROM TABLE LT_DELETE.
+
+    "로직 DB DELETE
+    LOOP AT LT_DELETE INTO LS_SAVE.
+      DELETE GT_FILTERED WHERE EMP_NUM      = LS_SAVE-ZEMP
+                       AND PROJECT_ID   = LS_SAVE-ZPROJ
+                       AND MODULE       = LS_SAVE-ZMODULE
+                       AND PERIOD_START = LS_SAVE-ZPERIOD_S
+                       AND PERIOD_END   = LS_SAVE-ZPERIOD_E.
+    ENDLOOP.
+  ENDIF.
+
+  "DB 작업 커밋 및 화면 갱신
+  COMMIT WORK.
+  CLEAR GT_EMP_INPUT.
+  PERFORM REFRESH_EMP_SUMMARY.
+  CALL METHOD GO_GRID01->REFRESH_TABLE_DISPLAY.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  SAVE_CERTI_DATA
+*&---------------------------------------------------------------------*
+FORM SAVE_CERTI_DATA .
+
+  DATA: LT_ROWS    TYPE LVC_T_ROW,
+        LS_ROW     TYPE LVC_S_ROW,
+        LV_IDX     TYPE SY-TABIX,
+        LV_BEFORE  TYPE N,
+        LV_AFTER   TYPE N,
+        LT_DEL_IDX TYPE STANDARD TABLE OF SY-TABIX WITH EMPTY KEY.
+
+  "INSERT 및 DELETE용 테이블/워크에어리어 선언
+  DATA: LT_INSERT2 TYPE TABLE OF ZEDUT068_0200,
+        LT_DELETE2 TYPE TABLE OF ZEDUT068_0200,
+        LS_SAVE2   TYPE ZEDUT068_0200.
+
+  "삭제 전 자격증 입력 건수 저장
+  LV_BEFORE = LINES( GT_CERTI_INPUT ).
+
+  "자격증코드 기준 정렬 및 중복 제거
+  SORT GT_CERTI_INPUT BY CERT_CODE.
+  DELETE ADJACENT DUPLICATES FROM GT_CERTI_INPUT COMPARING CERT_CODE.
+
+  "삭제 후 건수 저장
+  LV_AFTER = LINES( GT_CERTI_INPUT ).
+
+  "중복 제거된 경우 메시지 출력 및 리턴
+  IF LV_AFTER < LV_BEFORE.
+    MESSAGE TEXT-E04 TYPE 'S' DISPLAY LIKE 'E'. "중복된 행을 제거했습니다.
+    CALL METHOD GO_GRID_POPUP->REFRESH_TABLE_DISPLAY.
+    RETURN.
+  ENDIF.
+
+  "중복 인덱스 클리어
+  CLEAR LT_DEL_IDX.
+
+  "자격증 입력 데이터 순회하며 신규 데이터 판별
+  LOOP AT GT_CERTI_INPUT INTO DATA(LS_CERTI_INPUT).
+
+    LV_IDX = SY-TABIX.
+
+    "필수항목 CHECK
+    IF LS_CERTI_INPUT-CERT_CODE IS INITIAL.
+      MESSAGE TEXT-E07 TYPE 'S' DISPLAY LIKE 'E'. "자격증코드가 누락된 행이 있습니다.
+      RETURN.
+    ENDIF.
+
+    "기존 저장된 데이터에 해당 자격증이 있는지 확인
+    READ TABLE GT_CERTI_INPUT_SAVE TRANSPORTING NO FIELDS
+                                   WITH KEY CERT_CODE = LS_CERTI_INPUT-CERT_CODE.
+
+    "기존에 없는 경우 신규 INSERT 대상에 추가
+    IF SY-SUBRC <> 0.
+      CLEAR LS_SAVE2.
+      LS_SAVE2-ZEMP   = GV_SELECTED_EMP_NUM.
+      LS_SAVE2-ZCERTI = LS_CERTI_INPUT-CERT_CODE.
+      LS_SAVE2-ZDATE  = SY-DATUM.
+      LS_SAVE2-ERDAT  = SY-DATUM.
+      LS_SAVE2-ERZET  = SY-UZEIT.
+      LS_SAVE2-ERNAM  = SY-UNAME.
+      APPEND LS_SAVE2 TO LT_INSERT2.
+    ENDIF.
+  ENDLOOP.
+
+  "DELETE 처리: 저장되어 있던 값 중 현재 입력에 없는 항목
+  LOOP AT GT_CERTI_INPUT_SAVE INTO DATA(LS_CERTI_INPUT_SAVE).
+
+    READ TABLE GT_CERTI_INPUT TRANSPORTING NO FIELDS
+                              WITH KEY CERT_CODE   = LS_CERTI_INPUT_SAVE-CERT_CODE.
+
+    "INPUT 테이블에 없으면 DELETE 대상
+    IF SY-SUBRC <> 0.
+      CLEAR LS_SAVE2.
+      LS_SAVE2-ZEMP   = GV_SELECTED_EMP_NUM.
+      LS_SAVE2-ZCERTI = LS_CERTI_INPUT_SAVE-CERT_CODE.
+      APPEND LS_SAVE2 TO LT_DELETE2.
+    ENDIF.
+  ENDLOOP.
+
+  "실제 DB와 로직 DB(GT_MAIN)에 INSERT 처리
+  IF LT_INSERT2 IS NOT INITIAL.
+    "실제 DB INSERT
+    MODIFY ZEDUT068_0200 FROM TABLE LT_INSERT2.
+
+    "로직 DB INSERT
+    LOOP AT LT_INSERT2 INTO DATA(LS_SAVE1).
+      "기존 GT_MAIN에 사원이 존재하는지 확인
+      READ TABLE GT_MAIN INTO DATA(LS_EXIST) BINARY SEARCH
+                                             WITH KEY EMP_NUM = LS_SAVE1-ZEMP.
+      IF SY-SUBRC = 0.
+        "존재 시 자격증 코드만 업데이트
+        LS_EXIST-CERT_CODE = LS_SAVE1-ZCERTI.
+        MODIFY GT_MAIN FROM LS_EXIST INDEX SY-TABIX.
+      ELSE.
+        "존재하지 않으면 새로 추가
+        CLEAR GS_MAIN.
+        GS_MAIN-EMP_NUM   = LS_SAVE1-ZEMP.
+        GS_MAIN-CERT_CODE = LS_SAVE1-ZCERTI.
+        APPEND GS_MAIN TO GT_MAIN.
+      ENDIF.
+    ENDLOOP.
+  ENDIF.
+
+  "실제 DB와 로직 DB(GT_MAIN)에 DELETE 처리
+  IF LT_DELETE2 IS NOT INITIAL.
+    "실제 DB DELETE
+    DELETE ZEDUT068_0200 FROM TABLE LT_DELETE2.
+
+    "로직 DB DELETE
+    LOOP AT LT_DELETE2 INTO DATA(LS_SAVE3).
+      DELETE GT_MAIN WHERE EMP_NUM = LS_SAVE3-ZEMP
+                     AND CERT_CODE = LS_SAVE3-ZCERTI.
+    ENDLOOP.
+  ENDIF.
+
+  "DB 작업 커밋 및 화면 갱신
+  COMMIT WORK.
+  CLEAR GT_EMP_INPUT.
+  PERFORM REFRESH_EMP_SUMMARY.
+  CALL METHOD GO_GRID01->REFRESH_TABLE_DISPLAY.
+
+ENDFORM.
