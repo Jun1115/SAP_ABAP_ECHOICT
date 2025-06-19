@@ -7,7 +7,9 @@ SAP 사원 이력 관리 프로그램 개발 프로젝트
 "사원별로 연도 기준 프로젝트 투입 이력을 월 단위로 집계하고, 자격증 이력을 함께 관리하고자 합니다. 자격증은 팝업으로 조회/편집 가능하며, 프로젝트 투입 이력은 모듈, 기간 등의 유효성 검증이 필요합니다."
 
 ## 3. 구현한 결과물
+![image](https://github.com/user-attachments/assets/a4ba5a84-c64c-4c70-afc4-afbd49dde450)
 ![image](https://github.com/user-attachments/assets/e03939f3-659b-4bf2-acae-e61f7ff8005c)
+![image](https://github.com/user-attachments/assets/1e7a7fda-f623-4145-a464-2784d3edd9d7)
 
 ## 4.파일 이름 개요
 Z068_0060 : 메인 프로그램
