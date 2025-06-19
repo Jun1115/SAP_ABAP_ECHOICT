@@ -6,7 +6,10 @@ SAP 사원 이력 관리 프로그램 개발 프로젝트
 ## 2.임의의 고객 요청 사항
 "사원별로 연도 기준 프로젝트 투입 이력을 월 단위로 집계하고, 자격증 이력을 함께 관리하고자 합니다. 자격증은 팝업으로 조회/편집 가능하며, 프로젝트 투입 이력은 모듈, 기간 등의 유효성 검증이 필요합니다."
 
-## 3.파일 이름 개요
+## 3. 구현한 결과물
+!![initial]("https://github.com/user-attachments/assets/e03939f3-659b-4bf2-acae-e61f7ff8005c")
+
+## 4.파일 이름 개요
 Z068_0060 : 메인 프로그램
 
 INCLUDE Z068_0060_F01 : 전체 기능 로직 포함 (조회, 유효성검사, ALV 이벤트 처리 등)
@@ -15,7 +18,7 @@ ZEDUT068_0010 ~ ZEDUT068_0040 : 기준정보 테이블
 
 ZEDUT068_0100, 0200 : 프로젝트, 자격증 이력 관리 테이블
 
-## 4. Feedback
+## 5. Feedback
 "SELECT는 한 번만 사용해보기"라는 선택 조건이 있었기에 도전해보고 싶었습니다. 단순히 가산점 때문만은 아니고, DB를 직접 조회하는 SELECT 명령어는 서버와 메모리에 부담을 줄 수 있다는 점에서 최적화 차원에서도 의미 있다고 생각했습니다.
 도전정신은 좋았지만, 이 접근 방식이 오히려 불합격의 원인이 되지 않았나 싶습니다.
 
@@ -31,5 +34,5 @@ SELECT를 한 번만 사용하다 보니 여러 테이블을 JOIN하여 가져�
 
 정말 열심히 준비한 프로젝트였지만, 실력은 아직 부족했다는 것을 인정하게 되었습니다. 이번 경험을 계기로 SQLD와 정보처리기사 자격증을 준비하며 기본기를 더욱 탄탄하게 다져야겠다고 다짐했습니다.
 
-## 5. Skills
+## 6. Skills
 <img src="https://img.shields.io/badge/ABAP-0FAAFF?style=for-the-badge&logo=sap&logoColor=white"> <img src="https://img.shields.io/badge/SAP GUI-0FAAFF?style=for-the-badge&logo=sap&logoColor=white"> <img src="https://img.shields.io/badge/ALV GRID-0FAAFF?style=for-the-badge">
